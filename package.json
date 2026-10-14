@@ -22,7 +22,8 @@
     "check": "node scripts/manus/runtime-command.cjs ./verify.mjs",
     "inspect": "node scripts/manus/runtime-command.cjs ./inspect-file.mjs",
     "assets:report": "node scripts/manus/runtime-command.cjs ./asset-provenance.mjs",
-    "test:protocole": "node test/protocole.test.js"
+    "test:protocole": "node test/protocole.test.js",
+    "test:client": "node test/client.test.js"
   },
   "dependencies": {
     "ws": "^8.22.0"

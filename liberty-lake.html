@@ -24183,6 +24183,1858 @@ Game.prototype.update = function (dt) {
   _updateBorne.call(this, Math.min(0.1, dt));
 };
 
+/* ======================================================================
+   MODES EN LIGNE — BATTLE ET COURSE POURSUITE
+   ----------------------------------------------------------------------
+   Deux modes multijoueur ajoutés au module réseau, par encapsulation :
+   aucune ligne du moteur ni du lobby d'origine n'est réécrite.
+
+   BATTLE : affrontement par manches sur une arène dédiée et dense de
+   1500 x 1500 px, sans véhicule, sans civil et sans police. Les armes
+   réapparaissent ailleurs à chaque manche, classées par rareté.
+
+   COURSE POURSUITE : traque sur la carte du monde ouvert, police
+   désactivée. Les Fugitifs filent vers l'extraction, les Chasseurs les
+   éliminent avant.
+
+   LE CAMP NE SE CHOISIT QUE LÀ. Il n'existe ni à la création du compte,
+   ni dans un profil, ni dans le monde ouvert, ni en battle : c'est un
+   réglage de salle, valable pour une seule partie de course poursuite.
+   Le joueur peut prendre l'autre camp à la partie suivante.
+   ====================================================================== */
+
+/* ------------------------- 1. ARMES AJOUTÉES -------------------------
+   Sept armes de plus, miroir exact de la table du serveur. Elles ne
+   s'achètent pas : on les trouve au sol, dans l'arène.
+   --------------------------------------------------------------------- */
+Object.assign(WEAPONS, {
+  knife: { n: 'Couteau', dmg: 26, rate: 0.45, range: 54, spd: 0, spread: 0, pellets: 1, melee: true },
+  silenced: { n: 'Pistolet silencieux', dmg: 17, rate: 0.33, range: 520, spd: 980, spread: 0.035, pellets: 1, discret: true },
+  assault: { n: 'Fusil d’assaut', dmg: 22, rate: 0.14, range: 640, spd: 1180, spread: 0.055, pellets: 1 },
+  sniper: { n: 'Sniper', dmg: 85, rate: 1.30, range: 1400, spd: 1900, spread: 0.004, pellets: 1 },
+  glauncher: { n: 'Lance-grenades', dmg: 70, rate: 1.10, range: 620, spd: 520, spread: 0.02, pellets: 1, explose: 125 },
+  lmg: { n: 'Mitrailleuse lourde', dmg: 14, rate: 0.07, range: 560, spd: 1020, spread: 0.13, pellets: 1 },
+  grenade: { n: 'Grenades', dmg: 70, rate: 1.00, range: 420, spd: 420, spread: 0.02, pellets: 1, explose: 110 }
+});
+/* Les cinq premières entrées de WORDER restent celles des chiffres 1 à 5
+   du solo : on ajoute les nouvelles à la suite, la molette les atteint. */
+for (const k of ['knife', 'silenced', 'assault', 'sniper', 'glauncher', 'lmg', 'grenade'])
+  if (WORDER.indexOf(k) < 0) WORDER.push(k);
+
+/* Raretés : même répartition et mêmes couleurs que le serveur. */
+const MJ_RARETES = {
+  commune: { nom: 'COMMUNE', col: '#c6d8ee', armes: ['pistol', 'shotgun', 'knife', 'grenade'] },
+  rare: { nom: 'RARE', col: '#58c4ff', armes: ['smg', 'assault', 'silenced'] },
+  legendaire: { nom: 'LÉGENDAIRE', col: '#ffd45e', armes: ['sniper', 'glauncher', 'lmg'] }
+};
+/* Couleurs des camps. Orange pour les Fugitifs, violet pour les
+   Chasseurs ; rouge et bleu pour les deux bases de l'arène.           */
+const MJ_CAMPS = {
+  battle: { 1: { n: 'ROUGE', c: '#ff6b6b' }, 2: { n: 'BLEUE', c: '#58c4ff' } },
+  poursuite: { 1: { n: 'FUGITIFS', c: '#ff9f43' }, 2: { n: 'CHASSEURS', c: '#c08aff' } }
+};
+/* Les deux modes rejoignent les tables du module réseau : étiquettes
+   d'équipe du salon et du tableau des scores, et touche Tab consacrée
+   au classement plutôt qu'à la fiche de personnage.                   */
+Object.assign(NET_EQUIPES, {
+  battle: { 1: { n: 'ROUGE', c: '#ff6b6b' }, 2: { n: 'BLEUE', c: '#58c4ff' } },
+  poursuite: { 1: { n: 'FUGITIFS', c: '#ff9f43' }, 2: { n: 'CHASSEURS', c: '#c08aff' } }
+});
+NET_MODES_SCORES.battle = 1;
+NET_MODES_SCORES.poursuite = 1;
+
+/* Libellés des véhicules de départ de la course poursuite. */
+const MJ_VEHICULES = {
+  sport: 'Sportive', moto: 'Moto', sedan: 'Berline légère',
+  berline: 'Berline légère', suv: 'SUV blindé', muscle: 'Muscle car', pickup: 'Pick-up'
+};
+const MJ_VEH_KIND = { berline: 'sedan' };     // le moteur ne connaît que « sedan »
+
+/* ===================== 2. GÉNÉRATEUR DE L'ARÈNE ======================
+   L'arène est un enclos de 1500 x 1500 px tiré de la graine de la salle,
+   posé dans le quartier le plus dense de la carte. Son décor propre
+   (conteneurs, épaves, escaliers extérieurs, arches) est calculé par un
+   générateur indépendant, à sa propre graine : tous les clients d'une
+   même salle obtiennent exactement la même arène, l'hôte comme les
+   autres, sans rien échanger.
+
+   Pourquoi dans le monde partagé plutôt qu'un second monde complet : le
+   générateur de ville de ce fichier est monolithique et la moitié des
+   systèmes (commerces, campagne, missions) suppose une vraie ville
+   derrière. On réserve donc une enceinte, on y ajoute son décor, on en
+   interdit la sortie et on coupe trafic, civils et police.
+   ===================================================================== */
+const ARENE = {
+  taille: 1500,
+  cle: '',            // graine de l'arène déjà construite
+  rect: null,
+  bases: [],
+  zones: [],
+  centre: null,
+  decor: [],
+
+  /* Construit (une seule fois par graine) l'arène de la salle. */
+  definir(graine, G) {
+    const cle = String(graine >>> 0);
+    if (this.cle === cle && this.rect) return this;
+    const R = mulberry32((graine >>> 0) ^ 0x5eed14);   // générateur dédié
+    const al = (a, b) => a + R() * (b - a);
+    const T = this.taille;
+    const W = G.world;
+
+    /* --- emplacement : au cœur de la ville, là où le bâti est dense --- */
+    const x = Math.round(al(CITY.x0 + 60, CITY.x1 - T - 60));
+    const y = Math.round(al(CITY.y0 + 60, CITY.y1 - T - 60));
+    const rect = { x, y, w: T, h: T };
+
+    const libre = (px, py, marge) => !W.water.isWater(px, py) && !W.buildingAt(px, py) &&
+      px > rect.x + 40 && py > rect.y + 40 &&
+      px < rect.x + rect.w - 40 && py < rect.y + rect.h - 40 &&
+      W.nearRoad(px, py, 200) > (marge || 0);
+    /* Cherche un point sûr autour d'une cible, en spirale. */
+    const sur = (cx, cy, marge) => {
+      for (let i = 0; i < 400; i++) {
+        const a = R() * TAU, d = 10 + i * 2.2;
+        const px = clamp(cx + Math.cos(a) * d, rect.x + 50, rect.x + rect.w - 50);
+        const py = clamp(cy + Math.sin(a) * d, rect.y + 50, rect.y + rect.h - 50);
+        if (libre(px, py, marge)) return { x: Math.round(px), y: Math.round(py) };
+      }
+      return { x: Math.round(cx), y: Math.round(cy) };
+    };
+
+    /* --- deux bases opposées : rouge au nord-ouest, bleue au sud-est ---
+       Asymétriques (le décor diffère) mais équidistantes du centre.    */
+    const b1 = sur(rect.x + 190, rect.y + 190, 0);
+    const b2 = sur(rect.x + rect.w - 190, rect.y + rect.h - 190, 0);
+    const bases = [
+      { equipe: 1, x: b1.x, y: b1.y, r: 150, col: '#ff6b6b' },
+      { equipe: 2, x: b2.x, y: b2.y, r: 150, col: '#58c4ff' }
+    ];
+    for (const b of bases) {
+      // coffre de base d'un côté, point de soin de l'autre
+      const c = sur(b.x + (b.equipe === 1 ? 70 : -70), b.y, 0);
+      const s = sur(b.x, b.y + (b.equipe === 1 ? 70 : -70), 0);
+      b.coffre = c; b.soin = s;
+    }
+    const centre = sur(rect.x + rect.w / 2, rect.y + rect.h / 2, 0);
+
+    /* --- emplacements d'armes : répartis sur une grille perturbée, hors
+       des bases et des coins inaccessibles --- */
+    const zones = [];
+    const pas = 5;                     // 5 x 5 mailles = jusqu'à 25 points
+    for (let i = 0; i < pas; i++) for (let k = 0; k < pas; k++) {
+      const cx = rect.x + (i + 0.5) * rect.w / pas + al(-90, 90);
+      const cy = rect.y + (k + 0.5) * rect.h / pas + al(-90, 90);
+      const p = sur(cx, cy, 0);
+      if (bases.some(b => dist2(b.x, b.y, p.x, p.y) < (b.r + 70) * (b.r + 70))) continue;
+      if (zones.some(z => dist2(z.x, z.y, p.x, p.y) < 110 * 110)) continue;
+      zones.push(p);
+    }
+    // on complète au hasard si la grille a été trop filtrée
+    for (let essai = 0; essai < 400 && zones.length < 24; essai++) {
+      const p = sur(al(rect.x + 90, rect.x + rect.w - 90), al(rect.y + 90, rect.y + rect.h - 90), 0);
+      if (bases.some(b => dist2(b.x, b.y, p.x, p.y) < (b.r + 70) * (b.r + 70))) continue;
+      if (zones.some(z => dist2(z.x, z.y, p.x, p.y) < 100 * 100)) continue;
+      zones.push(p);
+    }
+
+    /* --- décor propre à l'arène ---
+       Conteneurs et épaves servent de couverture, les arches font des
+       passages couverts, les escaliers marquent les toits accessibles du
+       regard. Tout est solide sauf les arches, qu'on traverse.         */
+    const decor = [];
+    const poser = (p, type, w, h) => {
+      if (!p) return;
+      const it = {
+        x: Math.round(p.x - w / 2), y: Math.round(p.y - h / 2), w, h,
+        kind: type, solid: type !== 'arche', teinte: R(),
+        ang: type === 'epave' ? al(-0.6, 0.6) : 0
+      };
+      decor.push(it);
+    };
+    for (let i = 0; i < 34; i++) {
+      const p = sur(al(rect.x + 80, rect.x + rect.w - 80), al(rect.y + 80, rect.y + rect.h - 80), 10);
+      if (bases.some(b => dist2(b.x, b.y, p.x, p.y) < 110 * 110)) continue;
+      if (decor.some(d => dist2(d.x + d.w / 2, d.y + d.h / 2, p.x, p.y) < 70 * 70)) continue;
+      const t = R();
+      if (t < 0.42) poser(p, 'conteneur', 92, 38);
+      else if (t < 0.7) poser(p, 'epave', 58, 30);
+      else if (t < 0.85) poser(p, 'escalier', 44, 62);
+      else poser(p, 'arche', 86, 86);
+    }
+
+    this.cle = cle;
+    this.rect = rect; this.bases = bases; this.zones = zones;
+    this.centre = centre; this.decor = decor;
+    this.indexe = false;
+    return this;
+  },
+
+  /* Pose le décor solide de l'arène dans la grille de collision. Appelé
+     à l'entrée en partie, retiré à la sortie.                          */
+  poserDecor(G) {
+    if (this.indexe || !this.decor.length) return;
+    const W = G.world;
+    for (const d of this.decor) {
+      if (!d.solid) continue;
+      W.addToCells(d, 'solids', d);
+    }
+    this.indexe = true;
+  },
+  retirerDecor(G) {
+    if (!this.indexe || !G || !G.world) return;
+    const W = G.world;
+    const dedans = new Set(this.decor);
+    W.forCells(this.rect.x - 100, this.rect.y - 100, this.rect.w + 200, this.rect.h + 200, c => {
+      c.solids = c.solids.filter(s => !dedans.has(s));
+    });
+    this.indexe = false;
+  },
+
+  /* Géométrie envoyée au serveur par l'hôte. */
+  pourServeur() {
+    if (!this.rect) return null;
+    return {
+      rect: this.rect, centre: this.centre,
+      bases: this.bases.map(b => ({ x: b.x, y: b.y, r: b.r, coffre: b.coffre, soin: b.soin })),
+      zones: this.zones
+    };
+  }
+};
+
+/* ===================== 3. ÉTAT DES DEUX MODES ======================== */
+const MODEJEU = {
+  mode: '',              // '' hors de ces modes · 'battle' · 'poursuite'
+  init: null,            // dernier MODE_INIT
+  etat: null,            // dernier MODE (5 Hz)
+  armes: new Map(),      // armes au sol : id → { arme, rarete, x, y, lache }
+  resultat: null,        // écran de résultats de manche
+  resultatT: 0,
+  traque: [],            // positions connues des Fugitifs (Chasseurs)
+  raccourcis: [],        // raccourcis révélés (Fugitifs)
+  barrages: [],
+  barragePrevu: null,
+  renfort: null,         // moto de renfort annoncée
+  alarme: 0,             // clignotement du verrou de traque subi
+  verrouT: 0,
+  extracReste: 0,
+  recompense: null,
+  titre: '',
+  cibleArme: null,       // arme au sol à portée (touche F)
+  choixVeh: null,        // panneau de choix du véhicule de départ
+  derNotif: 0,
+
+  actif() { return !!this.mode && NET.enPartie(); },
+  estBattle() { return this.mode === 'battle' && NET.enPartie(); },
+  estPoursuite() { return this.mode === 'poursuite' && NET.enPartie(); },
+  monCamp() { return this.init ? this.init.equipe : 0; },
+  couleurCamp(e) {
+    const t = MJ_CAMPS[this.mode];
+    return t && t[e] ? t[e].c : '#9ec5ff';
+  },
+  nomCamp(e) {
+    const t = MJ_CAMPS[this.mode];
+    return t && t[e] ? t[e].n : 'ÉQUIPE ' + e;
+  },
+
+  /* Remise à zéro complète : on quitte la salle ou le mode change. */
+  reinitialiser(G) {
+    if (this.mode === 'battle' && G) ARENE.retirerDecor(G);
+    const hud = document.getElementById('mp-hud');
+    if (hud && hud.className === 'mj-modes') hud.className = '';
+    this.mode = ''; this.init = null; this.etat = null;
+    this.armes.clear();
+    this.resultat = null; this.resultatT = 0;
+    this.traque = []; this.raccourcis = []; this.barrages = [];
+    this.barragePrevu = null; this.renfort = null;
+    this.alarme = 0; this.verrouT = 0; this.extracReste = 0;
+    this.recompense = null; this.cibleArme = null; this.choixVeh = null;
+  },
+
+  /* ------------------------- MODE_INIT reçu -------------------------
+     Le message peut arriver pendant que la ville se construit encore
+     (joueur qui rejoint une partie en cours) : on retient l'état et on
+     applique l'équipement à la première image réellement jouée.       */
+  demarrer(m) {
+    this.reinitialiser(G);
+    this.mode = m.mode;
+    this.init = m;
+    this.extraction = m.extraction || null;
+    this.aEquiper = true;
+    if (m.mode === 'battle')
+      NET.message('BATTLE — ' + (m.manches || 3) + ' manches à remporter · équipe ' +
+        this.nomCamp(m.equipe), this.couleurCamp(m.equipe));
+    if (m.mode === 'poursuite') {
+      NET.message('COURSE POURSUITE — vous êtes ' + this.nomCamp(m.equipe) +
+        ' · extraction : ' + ((m.extraction && m.extraction.nom) || 'point fixe'),
+        this.couleurCamp(m.equipe));
+      if (m.extraction && m.extraction.txt) NET.message(m.extraction.txt, '#9ec5ff');
+      // choix du véhicule de départ, proposé pendant l'avance
+      if (Array.isArray(m.veh) && m.veh.length) this.choixVeh = { liste: m.veh, t: 0 };
+    }
+    LOBBY.majVoyant();
+  },
+
+  /* Équipement de départ, posé une fois la carte en place. */
+  equiper() {
+    if (!this.aEquiper || !G || !G.player) return;
+    this.aEquiper = false;
+    const m = this.init, P = G.player;
+    if (m.mode === 'battle') {
+      ARENE.definir(NET.init ? NET.init.seed : SEED, G);
+      ARENE.poserDecor(G);
+      // chaque manche repart au couteau, à la moitié de la vie
+      P.owned = { fists: true, knife: true };
+      P.weapon = 'knife';
+      for (const k in P.ammo) P.ammo[k] = 0;
+    }
+    if (m.mode === 'poursuite') {
+      // les deux camps démarrent avec pistolet et deux chargeurs
+      P.owned = { fists: true, pistol: true };
+      P.weapon = 'pistol';
+      for (const k in P.ammo) P.ammo[k] = 0;
+      P.ammo.pistol = 24;
+      if (m.depart) G.mm.explore(m.depart.x, m.depart.y);
+    }
+  },
+
+  /* ---------------------- MODE reçu (5 fois/s) --------------------- */
+  majEtat(m) {
+    this.etat = m;
+    if (m.mode === 'battle') {
+      // la liste d'armes du serveur fait foi : on remplace la nôtre
+      this.armes.clear();
+      for (const a of m.armes || []) this.armes.set(a.id, a);
+      const P = G.player;
+      /* L'inventaire autoritaire décide de ce qu'on peut sortir : on ne
+         peut pas se retrouver avec une arme que le serveur ignore.     */
+      if (Array.isArray(m.inventaire)) {
+        const vus = { fists: true };
+        for (const k of m.inventaire) vus[k] = true;
+        P.owned = vus;
+        if (!vus[P.weapon]) P.weapon = m.inventaire.indexOf('knife') >= 0 ? 'knife' : 'fists';
+      }
+    }
+    if (m.mode === 'poursuite') {
+      this.traque = m.traque || [];
+      if (m.raccourcis) this.raccourcis = m.raccourcis;
+      this.barrages = m.barrages || [];
+      this.barragePrevu = m.barragePrevu || null;
+      this.verrouT = m.verrou || 0;
+      if (m.extraction) this.extraction = Object.assign(this.extraction || {}, m.extraction);
+    }
+  },
+
+  /* ------------------- événements propres aux modes ---------------- */
+  evenement(type, d) {
+    switch (type) {
+      case 'manche-debut':
+        this.armes.clear();
+        for (const a of d.armes || []) this.armes.set(a.id, a);
+        this.resultat = null; this.resultatT = 0;
+        NET.bandeauTexte('MANCHE ' + d.manche + ' — PRÉPAREZ-VOUS', d.gel || 5);
+        if (G) G.notify('Manche ' + d.manche + ' · ' + (d.armes || []).length + ' armes révélées sur la carte');
+        return true;
+      case 'manche-feu':
+        NET.bandeauTexte('FEU !', 1.6);
+        if (G) G.notify('Bouclier de sortie de base : 3 secondes');
+        return true;
+      case 'manche-fin':
+        this.resultat = d;
+        this.resultatT = d.attente || 10;
+        this.armes.clear();
+        NET.bandeauTexte(d.gagnant
+          ? 'MANCHE REMPORTÉE PAR L’ÉQUIPE ' + this.nomCamp(d.gagnant)
+          : 'MANCHE NULLE', 4);
+        return true;
+      case 'arme-prise': {
+        const P = G.player;
+        P.owned[d.arme] = true;
+        if (d.mun) P.ammo[d.arme] = (P.ammo[d.arme] || 0) + d.mun;
+        P.weapon = d.arme;
+        const R = MJ_RARETES[d.rarete] || MJ_RARETES.commune;
+        G.notify((d.coffre ? 'Coffre de base : ' : '') + (WEAPONS[d.arme] || {}).n +
+          ' — ' + R.nom);
+        if (G.bip) G.bip(d.rarete === 'legendaire' ? 980 : 700, 0.12);
+        return true;
+      }
+      case 'arme-partie':
+        this.armes.delete(d.id);
+        return true;
+      case 'armes-lachees':
+        for (const a of d.armes || []) this.armes.set(a.id, a);
+        return true;
+      case 'soin':
+        if (G) { G.player.hp = d.hp; G.notify('Point de soin : ' + Math.round(d.hp) + ' PV'); }
+        return true;
+
+      /* ---------------- course poursuite ---------------- */
+      case 'avance':
+        if (d.fin) {
+          NET.bandeauTexte(this.monCamp() === 2 ? 'CHASSE OUVERTE' : 'LES CHASSEURS SONT LÂCHÉS', 3);
+          this.choixVeh = null;
+        } else if (d.n > 0 && d.n <= 10) {
+          NET.bandeauTexte((this.monCamp() === 2 ? 'DÉPART DANS ' : 'AVANCE : ') + d.n + ' S', 1.2);
+        }
+        return true;
+      case 'verrou':
+        this.alarme = 10;
+        NET.bandeauTexte('SIGNAL VERROUILLÉ — VOUS ÊTES PISTÉ', 4);
+        if (G && G.bip) G.bip(320, 0.5);
+        return true;
+      case 'verrou-pose':
+        if (G) G.notify('Verrou de traque sur ' + d.pseudo + ' — position en direct ' + d.duree + ' s');
+        return true;
+      case 'barrage-annonce':
+        this.barragePrevu = { x: d.x, y: d.y };
+        if (G) G.notify('Barrage de faction dans ' + d.dans + ' s — repère sur la carte');
+        return true;
+      case 'barrage':
+        this.barrages.push({ x: d.x, y: d.y });
+        if (G) { G.notify('Barrage en place'); this.poserBarrage(d.x, d.y); }
+        return true;
+      case 'raccourci':
+        this.raccourcis.push({ x: d.x, y: d.y, nom: d.nom });
+        if (G) G.notify('Raccourci révélé : ' + (d.nom || 'passage') + ' (vous seuls le voyez)');
+        return true;
+      case 'renfort':
+        this.renfort = { x: d.x, y: d.y };
+        this.faireApparaitreRenfort(d.x, d.y);
+        return true;
+      case 'extraction-ouverte':
+        if (d.zones) this.extraction = Object.assign(this.extraction || {}, { zones: d.zones, ouverte: true });
+        NET.bandeauTexte('ZONE D’EXTRACTION OUVERTE', 4);
+        return true;
+      case 'extraction-cours':
+        this.extracReste = d.annule ? 0 : d.reste;
+        if (!d.annule && d.reste > 0) NET.bandeauTexte('EXTRACTION DANS ' + d.reste + ' S', 1.2);
+        return true;
+      case 'recompense':
+        this.recompense = d;
+        if (d.titre) this.titre = d.titre;
+        if (G) {
+          G.player.money += d.argent || 0;
+          G.notify((d.victoire ? 'Victoire' : 'Défaite') + ' — ' + (d.argent || 0) +
+            ' $ (x' + d.mult + ')' + (d.titre ? ' · titre : ' + d.titre : ''));
+        }
+        NET.message((d.victoire ? 'VICTOIRE' : 'DÉFAITE') + ' · gain x' + d.mult +
+          (d.mvp ? ' · MVP ' + d.mvp : '') + (d.titre ? ' · « ' + d.titre + ' » pendant 24 h' : ''),
+          d.victoire ? '#7ae582' : '#ff9f43');
+        return true;
+    }
+    return false;
+  },
+
+  /* Un barrage : trois épaves en travers de la route, posées localement
+     (le serveur n'en connaît que la position).                        */
+  poserBarrage(x, y) {
+    if (!G || !G.world) return;
+    const n = G.world.nodes && G.world.nodes.length
+      ? G.world.nodes.reduce((m, q) => dist2(q.x, q.y, x, y) < dist2(m.x, m.y, x, y) ? q : m, G.world.nodes[0])
+      : { x, y };
+    const a = Math.random() * TAU;
+    for (let i = -1; i <= 1; i++) {
+      const v = new Vehicle(n.x + Math.cos(a + 1.57) * i * 52, n.y + Math.sin(a + 1.57) * i * 52, a, 'van');
+      v.speed = 0; v.driver = null; v.barrage = true;
+      G.vehicles.push(v);
+    }
+  },
+  /* Moto de renfort pour un Fugitif à pied : posée sur la route la plus
+     proche du point annoncé par le serveur.                           */
+  faireApparaitreRenfort(x, y) {
+    if (!G || !G.world) return;
+    const W = G.world;
+    let p = { x, y };
+    for (let i = 0; i < 160; i++) {
+      const a = Math.random() * TAU, d = i * 2;
+      const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
+      if (W.water.isWater(px, py) || W.buildingAt(px, py)) continue;
+      const dr = W.nearRoad(px, py, 200);
+      if (dr > 0 && dr < 30) { p = { x: px, y: py }; break; }
+    }
+    const v = new Vehicle(p.x, p.y, Math.random() * TAU, 'moto');
+    v.speed = 0; v.driver = null; v.renfort = true;
+    G.vehicles.push(v);
+    G.notify('Renfort mécanique : une moto vous attend (repère sur votre carte)');
+  },
+
+  /* Véhicule de départ choisi par le joueur dans sa liste de camp. */
+  prendreVehicule(kind) {
+    if (!G) return;
+    const vrai = MJ_VEH_KIND[kind] || kind;
+    const W = G.world, P = G.player;
+    let p = { x: P.x + 60, y: P.y + 60 };
+    for (let i = 0; i < 200; i++) {
+      const a = Math.random() * TAU, d = 40 + i * 2;
+      const px = P.x + Math.cos(a) * d, py = P.y + Math.sin(a) * d;
+      if (W.water.isWater(px, py) || W.buildingAt(px, py)) continue;
+      const dr = W.nearRoad(px, py, 200);
+      if (dr > 0 && dr < 34) { p = { x: px, y: py }; break; }
+    }
+    const v = new Vehicle(p.x, p.y, Math.random() * TAU, vrai);
+    v.speed = 0; v.driver = null;
+    G.vehicles.push(v);
+    this.choixVeh = null;
+    G.notify((MJ_VEHICULES[kind] || kind) + ' livré à côté de vous — E pour monter');
+  },
+
+  /* ------------------------ boucle de jeu -------------------------- */
+  /* Appelée après la mise à jour du moteur : confinement de l'arène,
+     ramassage d'armes, horloges d'affichage.                          */
+  avancer(dt) {
+    if (!this.actif()) return;
+    this.equiper();
+    // le voyant réseau descend sous le bandeau de manche / de traque
+    const hud = document.getElementById('mp-hud');
+    if (hud && hud.className === '') hud.className = 'mj-modes';
+    const P = G.player;
+    if (this.resultatT > 0) this.resultatT = Math.max(0, this.resultatT - dt);
+    if (this.alarme > 0) this.alarme = Math.max(0, this.alarme - dt);
+
+    /* --- aucune police dans ces deux modes --- */
+    if (G.stars || G.wantedPoints) { G.wantedPoints = 0; G.clearWanted(); }
+    if (G.cops.length) G.cops.length = 0;
+    if (G.heli) G.heli = null;
+
+    if (this.estBattle()) {
+      /* --- enceinte : on ne sort pas du terrain --- */
+      const R = ARENE.rect;
+      if (R) {
+        const cible = P.veh || P;
+        const nx = clamp(cible.x, R.x + 26, R.x + R.w - 26);
+        const ny = clamp(cible.y, R.y + 26, R.y + R.h - 26);
+        if (nx !== cible.x || ny !== cible.y) {
+          cible.x = nx; cible.y = ny;
+          if (P.veh) { P.x = nx; P.y = ny; }
+          if (G.time - this.derNotif > 3) { this.derNotif = G.time; G.notify('Limite de l’arène'); }
+        }
+      }
+      /* --- gel pendant le décompte de manche : on ne bouge pas --- */
+      if (this.etat && this.etat.phase === 'gel') { P.vx = 0; P.vy = 0; }
+      /* --- arme au sol la plus proche, et coffre de base --- */
+      this.cibleArme = null;
+      let best = 70 * 70;
+      for (const a of this.armes.values()) {
+        const d = dist2(P.x, P.y, a.x, a.y);
+        if (d < best) { best = d; this.cibleArme = a; }
+      }
+      const b = ARENE.bases[(this.monCamp() || 1) - 1];
+      if (!this.cibleArme && b && dist2(P.x, P.y, b.coffre.x, b.coffre.y) < 110 * 110)
+        this.cibleArme = { id: 'coffre', arme: '', rarete: 'commune', x: b.coffre.x, y: b.coffre.y, coffre: true };
+    }
+
+    if (this.estPoursuite()) {
+      /* --- les Chasseurs sont bloqués pendant l'avance des Fugitifs --- */
+      if (this.etat && this.etat.avance > 0 && this.monCamp() === 2) {
+        P.vx = 0; P.vy = 0;
+        if (P.veh) P.veh.speed *= 0.2;
+      }
+    }
+  },
+
+  /* Touche F : ramasser l'arme au sol / ouvrir le coffre de base. */
+  interagir() {
+    if (!this.estBattle() || !this.cibleArme) return false;
+    NET.envoyer({ t: 'INTERACT', type: 'arme', cible: this.cibleArme.id });
+    return true;
+  },
+  /* Infobulle d'interaction. */
+  infobulle() {
+    if (!this.estBattle() || !this.cibleArme) return '';
+    if (this.cibleArme.coffre) return 'F — coffre de base (arme gratuite)';
+    const R = MJ_RARETES[this.cibleArme.rarete] || MJ_RARETES.commune;
+    return 'F — ramasser ' + ((WEAPONS[this.cibleArme.arme] || {}).n || this.cibleArme.arme) +
+      ' (' + R.nom + ')';
+  },
+
+  /* ============================ RENDU =============================== */
+  /* Décor et repères au sol, dessinés avec le monde. */
+  dessinerMonde(g, v) {
+    if (!this.actif()) return;
+    if (this.estBattle()) { this.dessinerArene(g, v); this.dessinerArmes(g); }
+    if (this.estPoursuite()) this.dessinerPoursuite(g);
+  },
+
+  dessinerArene(g, v) {
+    const R = ARENE.rect;
+    if (!R) return;
+    const t = G.time;
+    /* --- enceinte : grillage lumineux --- */
+    g.save();
+    g.strokeStyle = 'rgba(255,107,107,' + (0.3 + 0.12 * Math.sin(t * 2)) + ')';
+    g.lineWidth = 6;
+    g.setLineDash([26, 16]);
+    g.strokeRect(R.x, R.y, R.w, R.h);
+    g.setLineDash([]);
+    g.restore();
+
+    /* --- décor propre à l'arène --- */
+    for (const d of ARENE.decor) {
+      if (d.x + d.w < v.x - 60 || d.x > v.x + v.w + 60 ||
+        d.y + d.h < v.y - 60 || d.y > v.y + v.h + 60) continue;
+      g.save();
+      g.translate(d.x + d.w / 2, d.y + d.h / 2);
+      g.rotate(d.ang || 0);
+      if (d.kind === 'conteneur') {
+        const cols = ['#b8452f', '#2f6fd8', '#3aa86a', '#d8a93a'];
+        g.fillStyle = cols[(d.teinte * cols.length) | 0];
+        rr(g, -d.w / 2, -d.h / 2, d.w, d.h, 3); g.fill();
+        g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 2; g.stroke();
+        // nervures verticales
+        g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 1.4;
+        for (let i = -d.w / 2 + 8; i < d.w / 2; i += 9) {
+          g.beginPath(); g.moveTo(i, -d.h / 2 + 3); g.lineTo(i, d.h / 2 - 3); g.stroke();
+        }
+      } else if (d.kind === 'epave') {
+        g.fillStyle = '#4a4f58';
+        rr(g, -d.w / 2, -d.h / 2, d.w, d.h, 7); g.fill();
+        g.fillStyle = '#2a2d33';
+        rr(g, -d.w / 2 + 9, -d.h / 2 + 5, d.w * 0.42, d.h - 10, 4); g.fill();
+        g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 2; g.stroke();
+        // vitres soufflées
+        g.fillStyle = 'rgba(20,24,30,.8)';
+        g.fillRect(-4, -d.h / 2 + 4, 14, d.h - 8);
+      } else if (d.kind === 'escalier') {
+        g.fillStyle = '#6b7280';
+        rr(g, -d.w / 2, -d.h / 2, d.w, d.h, 2); g.fill();
+        g.strokeStyle = 'rgba(18,22,28,.6)'; g.lineWidth = 1.6;
+        for (let i = -d.h / 2 + 7; i < d.h / 2; i += 9) {
+          g.beginPath(); g.moveTo(-d.w / 2 + 2, i); g.lineTo(d.w / 2 - 2, i); g.stroke();
+        }
+      } else {               // arche : on passe dessous
+        g.strokeStyle = 'rgba(214,222,236,.28)'; g.lineWidth = 12;
+        g.beginPath(); g.arc(0, d.h / 2, d.w / 2 - 6, Math.PI, 0); g.stroke();
+        g.fillStyle = 'rgba(10,14,20,.18)';
+        g.fillRect(-d.w / 2, -2, d.w, d.h / 2);
+      }
+      g.restore();
+    }
+
+    /* --- bases : disque de camp, coffre, point de soin --- */
+    for (const b of ARENE.bases) {
+      const mienne = b.equipe === this.monCamp();
+      g.save();
+      g.globalAlpha = 0.14;
+      g.fillStyle = b.col;
+      g.beginPath(); g.arc(b.x, b.y, b.r, 0, TAU); g.fill();
+      g.globalAlpha = 0.6;
+      g.strokeStyle = b.col; g.lineWidth = 3;
+      g.setLineDash([12, 9]);
+      g.beginPath(); g.arc(b.x, b.y, b.r, 0, TAU); g.stroke();
+      g.setLineDash([]);
+      g.restore();
+      // coffre
+      g.save();
+      g.fillStyle = mienne ? '#ffd45e' : 'rgba(255,212,94,.35)';
+      rr(g, b.coffre.x - 15, b.coffre.y - 11, 30, 22, 4); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 2; g.stroke();
+      g.restore();
+      // point de soin : croix qui pulse
+      g.save();
+      g.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 3);
+      g.fillStyle = '#3ddc84';
+      g.fillRect(b.soin.x - 13, b.soin.y - 4, 26, 8);
+      g.fillRect(b.soin.x - 4, b.soin.y - 13, 8, 26);
+      g.restore();
+    }
+  },
+
+  /* Armes au sol : pastille à la couleur de la rareté, halo doré et
+     clignotant pour la légendaire.                                     */
+  dessinerArmes(g) {
+    const t = G.time;
+    for (const a of this.armes.values()) {
+      const R = MJ_RARETES[a.rarete] || MJ_RARETES.commune;
+      const leg = a.rarete === 'legendaire';
+      g.save();
+      g.translate(a.x, a.y);
+      const puls = leg ? 0.55 + 0.45 * Math.abs(Math.sin(t * 4)) : 0.8;
+      g.globalAlpha = 0.2 * puls;
+      g.fillStyle = R.col;
+      g.beginPath(); g.arc(0, 0, leg ? 34 : 20, 0, TAU); g.fill();
+      g.globalAlpha = puls;
+      g.fillStyle = R.col;
+      rr(g, -11, -7, 22, 14, 3); g.fill();
+      g.strokeStyle = 'rgba(8,12,18,.7)'; g.lineWidth = 1.6; g.stroke();
+      // flèche de ramassage
+      g.globalAlpha = 0.5 + 0.3 * Math.sin(t * 5 + a.x);
+      g.fillStyle = R.col;
+      g.beginPath();
+      g.moveTo(0, -18 - (leg ? 6 : 0)); g.lineTo(-5, -26 - (leg ? 6 : 0)); g.lineTo(5, -26 - (leg ? 6 : 0));
+      g.closePath(); g.fill();
+      g.restore();
+    }
+  },
+
+  /* Repères au sol de la course poursuite : extraction, caisse, barrages,
+     raccourcis réservés aux Fugitifs.                                   */
+  dessinerPoursuite(g) {
+    const t = G.time, E = this.extraction;
+    if (E && E.ouverte && E.zones) {
+      for (const z of E.zones) {
+        g.save();
+        g.globalAlpha = 0.42 + 0.2 * Math.sin(t * 3);
+        g.strokeStyle = '#7ae582'; g.lineWidth = 5;
+        g.beginPath(); g.arc(z.x, z.y, z.r, 0, TAU); g.stroke();
+        g.globalAlpha = 0.1; g.fillStyle = '#7ae582';
+        g.beginPath(); g.arc(z.x, z.y, z.r, 0, TAU); g.fill();
+        g.restore();
+      }
+    }
+    if (E && E.caisse && !E.ouverte) {
+      const c = E.caisse;
+      g.save();
+      g.globalAlpha = 0.6 + 0.3 * Math.sin(t * 4);
+      g.fillStyle = '#ffd45e';
+      rr(g, c.x - 17, c.y - 13, 34, 26, 4); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 2; g.stroke();
+      g.globalAlpha = 0.12;
+      g.beginPath(); g.arc(c.x, c.y, c.r, 0, TAU); g.fill();
+      g.restore();
+    }
+    for (const b of this.barrages) {
+      g.save();
+      g.globalAlpha = 0.35;
+      g.strokeStyle = '#ffa33d'; g.lineWidth = 4;
+      g.setLineDash([14, 10]);
+      g.beginPath(); g.arc(b.x, b.y, 110, 0, TAU); g.stroke();
+      g.setLineDash([]);
+      g.restore();
+    }
+    if (this.monCamp() === 1) {
+      for (const r of this.raccourcis) {
+        g.save();
+        g.globalAlpha = 0.4 + 0.2 * Math.sin(t * 2.5);
+        g.strokeStyle = '#ff9f43'; g.lineWidth = 3;
+        g.beginPath(); g.arc(r.x, r.y, 60, 0, TAU); g.stroke();
+        g.restore();
+      }
+    }
+  },
+
+  /* ----------------------------- HUD ------------------------------- */
+  dessinerHud(g) {
+    if (!this.actif()) return;
+    if (this.estBattle()) this.hudBattle(g);
+    if (this.estPoursuite()) this.hudPoursuite(g);
+    if (this.resultat && this.resultatT > 0) this.ecranResultats(g);
+    if (this.choixVeh) this.panneauVehicules(g);
+  },
+
+  /* Bandeau de manche : score, survivants, chronomètre. */
+  hudBattle(g) {
+    const E = this.etat;
+    if (!E) return;
+    const W = G.cw, cx = W / 2;
+    const mm = Math.floor(E.reste / 60), ss = String(E.reste % 60).padStart(2, '0');
+    g.save();
+    g.font = '800 13px ' + ART.hud.police;
+    g.textAlign = 'center';
+    const l = 300;
+    g.fillStyle = 'rgba(8,13,20,.72)';
+    rr(g, cx - l / 2, 8, l, 46, 10); g.fill();
+    g.strokeStyle = 'rgba(160,180,210,.22)'; g.lineWidth = 1; g.stroke();
+    // manches gagnées
+    g.fillStyle = MJ_CAMPS.battle[1].c;
+    g.font = '900 22px ' + ART.hud.police;
+    g.fillText(String((E.gagnees || {})[1] || 0), cx - 102, 38);
+    g.fillStyle = MJ_CAMPS.battle[2].c;
+    g.fillText(String((E.gagnees || {})[2] || 0), cx + 102, 38);
+    // chronomètre et numéro de manche
+    g.fillStyle = '#e6eefc';
+    g.font = '900 20px ' + ART.hud.police;
+    g.fillText(mm + ':' + ss, cx, 34);
+    g.font = '700 10px ' + ART.hud.police;
+    g.fillStyle = '#9ec5ff';
+    g.fillText('MANCHE ' + E.manche + ' / ' + (this.init.manches || 3) +
+      (E.phase === 'gel' ? ' · PRÉPARATION' : E.phase === 'resultats' ? ' · RÉSULTATS' : ''), cx, 48);
+    // survivants
+    g.font = '700 10px ' + ART.hud.police;
+    g.fillStyle = MJ_CAMPS.battle[1].c;
+    g.fillText('▮'.repeat(Math.min(5, (E.vivants || {})[1] || 0)), cx - 62, 48);
+    g.fillStyle = MJ_CAMPS.battle[2].c;
+    g.fillText('▮'.repeat(Math.min(5, (E.vivants || {})[2] || 0)), cx + 62, 48);
+    g.textAlign = 'left';
+    g.restore();
+
+    // bouclier de sortie de base
+    if (E.bouclier > 0) {
+      g.save();
+      g.font = '800 12px ' + ART.hud.police;
+      g.textAlign = 'center';
+      g.fillStyle = 'rgba(90,217,192,.9)';
+      g.fillText('BOUCLIER ' + E.bouclier.toFixed(1) + ' S', cx, 76);
+      g.textAlign = 'left';
+      g.restore();
+    }
+    if (E.elimine) {
+      g.save();
+      g.font = '900 16px ' + ART.hud.police;
+      g.textAlign = 'center';
+      g.fillStyle = 'rgba(255,107,107,.92)';
+      g.fillText('ÉLIMINÉ — RETOUR À LA MANCHE SUIVANTE', cx, G.ch - 96);
+      g.textAlign = 'left';
+      g.restore();
+    }
+  },
+
+  /* Bandeau de traque : camp, chronomètre, état de l'extraction. */
+  hudPoursuite(g) {
+    const E = this.etat;
+    if (!E) return;
+    const cx = G.cw / 2;
+    const mm = Math.floor(E.reste / 60), ss = String(E.reste % 60).padStart(2, '0');
+    const camp = this.monCamp();
+    g.save();
+    g.font = '800 12px ' + ART.hud.police;
+    g.textAlign = 'center';
+    g.fillStyle = 'rgba(8,13,20,.72)';
+    rr(g, cx - 160, 8, 320, 44, 10); g.fill();
+    g.strokeStyle = 'rgba(160,180,210,.22)'; g.lineWidth = 1; g.stroke();
+    g.fillStyle = this.couleurCamp(camp);
+    g.font = '900 13px ' + ART.hud.police;
+    g.fillText(this.nomCamp(camp), cx, 25);
+    g.fillStyle = '#e6eefc';
+    g.font = '900 18px ' + ART.hud.police;
+    g.fillText(mm + ':' + ss, cx, 45);
+    g.font = '700 10px ' + ART.hud.police;
+    g.fillStyle = MJ_CAMPS.poursuite[1].c;
+    g.fillText('FUGITIFS ' + ((E.vivants || {})[1] || 0), cx - 108, 40);
+    g.fillStyle = MJ_CAMPS.poursuite[2].c;
+    g.fillText('CHASSEURS ' + ((E.vivants || {})[2] || 0), cx + 108, 40);
+    g.textAlign = 'left';
+    g.restore();
+
+    // avance des Fugitifs
+    if (E.avance > 0) {
+      g.save();
+      g.textAlign = 'center';
+      g.font = '900 15px ' + ART.hud.police;
+      g.fillStyle = camp === 2 ? '#c08aff' : '#ff9f43';
+      g.fillText(camp === 2 ? 'BLOQUÉ ENCORE ' + E.avance + ' S' : 'AVANCE : ' + E.avance + ' S', cx, 72);
+      g.textAlign = 'left';
+      g.restore();
+    }
+    // extraction verrouillée
+    const X = this.extraction;
+    if (X && !X.ouverte) {
+      g.save();
+      g.textAlign = 'center';
+      g.font = '800 11px ' + ART.hud.police;
+      g.fillStyle = 'rgba(255,212,94,.9)';
+      g.fillText(X.variante === 'minutee'
+        ? 'EXTRACTION DANS ' + Math.ceil((E.extraction && E.extraction.retard) || 0) + ' S'
+        : 'EXTRACTION VERROUILLÉE — CAISSE SPÉCIALE À RÉCUPÉRER', cx, 90);
+      g.textAlign = 'left';
+      g.restore();
+    }
+    // alarme du verrou de traque subi
+    if (this.alarme > 0 && camp === 1) {
+      const a = 0.25 + 0.25 * Math.abs(Math.sin(G.time * 9));
+      g.save();
+      g.strokeStyle = 'rgba(255,107,107,' + a + ')';
+      g.lineWidth = 10;
+      g.strokeRect(5, 5, G.cw - 10, G.ch - 10);
+      g.textAlign = 'center';
+      g.font = '900 13px ' + ART.hud.police;
+      g.fillStyle = '#ff6b6b';
+      g.fillText('POSITION RÉVÉLÉE', cx, G.ch - 118);
+      g.textAlign = 'left';
+      g.restore();
+    }
+    // compte à rebours d'extraction
+    if (this.extracReste > 0) {
+      g.save();
+      g.textAlign = 'center';
+      g.font = '900 26px ' + ART.hud.police;
+      g.fillStyle = '#7ae582';
+      g.fillText('EXTRACTION ' + this.extracReste, cx, G.ch / 2 - 60);
+      g.textAlign = 'left';
+      g.restore();
+    }
+  },
+
+  /* Écran de résultats de manche : 10 secondes entre deux manches. */
+  ecranResultats(g) {
+    const d = this.resultat;
+    const W = G.cw, H = G.ch;
+    const l = Math.min(640, W - 60), h = Math.min(60 + d.lignes.length * 26 + 70, H - 60);
+    const x = (W - l) / 2, y = (H - h) / 2;
+    g.save();
+    g.fillStyle = 'rgba(6,10,16,.88)';
+    rr(g, x, y, l, h, 16); g.fill();
+    g.strokeStyle = 'rgba(160,180,210,.3)'; g.lineWidth = 1.5; g.stroke();
+    g.textAlign = 'center';
+    g.font = '900 20px ' + ART.hud.police;
+    g.fillStyle = d.gagnant ? MJ_CAMPS.battle[d.gagnant].c : '#9ec5ff';
+    g.fillText(d.gagnant ? 'MANCHE ' + d.manche + ' — ÉQUIPE ' + this.nomCamp(d.gagnant)
+      : 'MANCHE ' + d.manche + ' — NULLE', x + l / 2, y + 32);
+    g.font = '700 11px ' + ART.hud.police;
+    g.fillStyle = '#9ec5ff';
+    g.fillText('SCORE DE PARTIE  ' + d.gagnees[1] + ' – ' + d.gagnees[2] +
+      '  ·  PREMIÈRE ÉQUIPE À ' + d.pourGagner +
+      '  ·  MANCHE SUIVANTE DANS ' + Math.ceil(this.resultatT) + ' S', x + l / 2, y + 50);
+    // tableau
+    g.textAlign = 'left';
+    g.font = '700 10px ' + ART.hud.police;
+    g.fillStyle = '#7a8ea6';
+    g.fillText('JOUEUR', x + 24, y + 74);
+    g.fillText('ÉLIM.', x + l - 250, y + 74);
+    g.fillText('MORTS', x + l - 200, y + 74);
+    g.fillText('ARME LA PLUS UTILISÉE', x + l - 150, y + 74);
+    let yy = y + 94;
+    const tri = d.lignes.slice().sort((a, b) => b.kills - a.kills || a.morts - b.morts);
+    for (const li of tri) {
+      g.font = '800 12px ' + ART.hud.police;
+      g.fillStyle = li.couleur || '#e6eefc';
+      g.fillText(li.pseudo + (li.mvp ? '' : ''), x + 24, yy);
+      if (li.mvp) {
+        const wN = g.measureText(li.pseudo).width;
+        g.fillStyle = '#ffd45e';
+        g.font = '900 10px ' + ART.hud.police;
+        g.fillText('★ MVP', x + 30 + wN, yy);
+      }
+      g.font = '700 11px ' + ART.hud.police;
+      g.fillStyle = MJ_CAMPS.battle[li.equipe] ? MJ_CAMPS.battle[li.equipe].c : '#9ec5ff';
+      g.fillText(this.nomCamp(li.equipe), x + l - 330, yy);
+      g.fillStyle = '#e6eefc';
+      g.fillText(String(li.kills), x + l - 250, yy);
+      g.fillText(String(li.morts), x + l - 200, yy);
+      g.fillStyle = '#c6d8ee';
+      g.fillText(li.arme ? ((WEAPONS[li.arme] || {}).n || li.arme) : '—', x + l - 150, yy);
+      yy += 26;
+    }
+    g.restore();
+  },
+
+  /* Panneau de choix du véhicule de départ (course poursuite). */
+  panneauVehicules(g) {
+    const C = this.choixVeh;
+    const l = 330, h = 60 + C.liste.length * 34;
+    // à droite : le chat du jeu occupe le bas à gauche
+    const x = G.cw - l - 24, y = G.ch - h - 110;
+    g.save();
+    g.fillStyle = 'rgba(6,10,16,.9)';
+    rr(g, x, y, l, h, 14); g.fill();
+    g.strokeStyle = 'rgba(160,180,210,.3)'; g.lineWidth = 1.5; g.stroke();
+    g.textAlign = 'center';
+    g.font = '900 13px ' + ART.hud.police;
+    g.fillStyle = this.couleurCamp(this.monCamp());
+    g.fillText('VÉHICULE DE DÉPART — ' + this.nomCamp(this.monCamp()), x + l / 2, y + 26);
+    g.textAlign = 'left';
+    C.liste.forEach((k, i) => {
+      g.font = '800 12px ' + ART.hud.police;
+      g.fillStyle = '#e6eefc';
+      g.fillText((i + 1) + ' — ' + (MJ_VEHICULES[k] || k), x + 26, y + 54 + i * 34);
+    });
+    g.font = '700 10px ' + ART.hud.police;
+    g.fillStyle = '#7a8ea6';
+    g.textAlign = 'center';
+    g.fillText('appuyez sur le chiffre correspondant', x + l / 2, y + h - 10);
+    g.textAlign = 'left';
+    g.restore();
+  },
+
+  /* ----------------------- minimap et grande carte ----------------- */
+  dessinerCarte(g, mx, my, k, plein) {
+    if (!this.actif()) return;
+    const t = G.time;
+    if (this.estBattle()) {
+      const R = ARENE.rect;
+      if (R) {
+        g.save();
+        g.strokeStyle = 'rgba(255,107,107,.5)'; g.lineWidth = 1.4;
+        g.strokeRect(mx(R.x), my(R.y), R.w * k, R.h * k);
+        g.restore();
+      }
+      for (const b of ARENE.bases) {
+        g.save();
+        g.fillStyle = b.col; g.globalAlpha = 0.75;
+        g.beginPath(); g.arc(mx(b.x), my(b.y), plein ? 6 : 4.5, 0, TAU); g.fill();
+        g.restore();
+      }
+      /* Armes révélées dès le début de la manche. L'arme légendaire a une
+         icône dorée clignotante, visible des deux équipes.             */
+      for (const a of this.armes.values()) {
+        const Ra = MJ_RARETES[a.rarete] || MJ_RARETES.commune;
+        const leg = a.rarete === 'legendaire';
+        g.save();
+        g.globalAlpha = leg ? 0.45 + 0.55 * Math.abs(Math.sin(t * 4)) : 0.8;
+        g.fillStyle = Ra.col;
+        if (leg) {
+          // étoile dorée
+          g.translate(mx(a.x), my(a.y));
+          g.beginPath();
+          for (let i = 0; i < 10; i++) {
+            const an = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 2.6 : 6.4;
+            i ? g.lineTo(Math.cos(an) * r, Math.sin(an) * r) : g.moveTo(Math.cos(an) * r, Math.sin(an) * r);
+          }
+          g.closePath(); g.fill();
+        } else {
+          g.beginPath(); g.arc(mx(a.x), my(a.y), a.lache ? 2 : 2.6, 0, TAU); g.fill();
+        }
+        g.restore();
+      }
+      return;
+    }
+
+    /* --------------------- course poursuite --------------------- */
+    const camp = this.monCamp();
+    const E = this.extraction;
+    if (E && E.ouverte && E.zones) {
+      for (const z of E.zones) {
+        g.save();
+        g.globalAlpha = 0.55 + 0.25 * Math.sin(t * 3);
+        g.strokeStyle = '#7ae582'; g.lineWidth = 2;
+        g.beginPath(); g.arc(mx(z.x), my(z.y), Math.max(4, z.r * k), 0, TAU); g.stroke();
+        g.globalAlpha = 0.85; g.fillStyle = '#7ae582';
+        g.beginPath(); g.arc(mx(z.x), my(z.y), plein ? 5 : 4, 0, TAU); g.fill();
+        g.restore();
+      }
+      // trajectoire de la zone mobile, visible des deux camps
+      if (E.variante === 'mobile' && E.zones.length) {
+        g.save();
+        g.strokeStyle = 'rgba(122,229,130,.45)'; g.lineWidth = 1.2;
+        g.setLineDash([4, 4]);
+        g.beginPath(); g.arc(mx(E.zones[0].x), my(E.zones[0].y), 18, 0, TAU); g.stroke();
+        g.setLineDash([]);
+        g.restore();
+      }
+    }
+    if (E && E.caisse && !E.ouverte) {
+      g.save();
+      g.globalAlpha = 0.6 + 0.3 * Math.sin(t * 4);
+      g.fillStyle = '#ffd45e';
+      g.fillRect(mx(E.caisse.x) - 3, my(E.caisse.y) - 3, 6, 6);
+      g.restore();
+    }
+    // barrages : vus des deux camps
+    for (const b of this.barrages) {
+      g.save();
+      g.fillStyle = '#ffa33d'; g.globalAlpha = 0.8;
+      g.fillRect(mx(b.x) - 3, my(b.y) - 2, 6, 4);
+      g.restore();
+    }
+    if (this.barragePrevu) {
+      g.save();
+      g.globalAlpha = 0.4 + 0.35 * Math.abs(Math.sin(t * 5));
+      g.strokeStyle = '#ffa33d'; g.lineWidth = 1.6;
+      g.beginPath(); g.arc(mx(this.barragePrevu.x), my(this.barragePrevu.y), 7, 0, TAU); g.stroke();
+      g.restore();
+    }
+    // raccourcis : Fugitifs uniquement
+    if (camp === 1) {
+      for (const r of this.raccourcis) {
+        g.save();
+        g.fillStyle = '#ff9f43'; g.globalAlpha = 0.85;
+        g.beginPath();
+        g.moveTo(mx(r.x), my(r.y) - 4); g.lineTo(mx(r.x) + 4, my(r.y) + 3); g.lineTo(mx(r.x) - 4, my(r.y) + 3);
+        g.closePath(); g.fill();
+        g.restore();
+      }
+      if (this.renfort) {
+        g.save();
+        g.globalAlpha = 0.5 + 0.4 * Math.abs(Math.sin(t * 4));
+        g.fillStyle = '#5ad9c0';
+        g.beginPath(); g.arc(mx(this.renfort.x), my(this.renfort.y), 3.4, 0, TAU); g.fill();
+        g.restore();
+      }
+    }
+    /* Chasseurs : dernière position connue des Fugitifs, avec son âge.
+       En temps réel seulement pendant un verrou de traque.            */
+    if (camp === 2) {
+      for (const f of this.traque) {
+        if (f.age < 0) continue;
+        const x = mx(f.x), y = my(f.y);
+        g.save();
+        g.globalAlpha = f.direct ? 0.95 : clamp(1 - f.age / 40, 0.3, 0.85);
+        g.fillStyle = MJ_CAMPS.poursuite[1].c;
+        if (f.direct) {
+          g.beginPath(); g.arc(x, y, plein ? 5 : 4, 0, TAU); g.fill();
+          g.strokeStyle = '#ffffff'; g.lineWidth = 1.4;
+          g.beginPath(); g.arc(x, y, 8 + 3 * Math.sin(t * 8), 0, TAU); g.stroke();
+        } else {
+          g.setLineDash([3, 3]);
+          g.strokeStyle = MJ_CAMPS.poursuite[1].c; g.lineWidth = 1.4;
+          g.beginPath(); g.arc(x, y, plein ? 6 : 5, 0, TAU); g.stroke();
+          g.setLineDash([]);
+        }
+        g.font = '700 9px ' + ART.hud.police;
+        g.textAlign = 'center';
+        g.fillStyle = 'rgba(230,238,252,.85)';
+        g.fillText(f.direct ? 'EN DIRECT' : 'vu il y a ' + f.age + 's', x, y - 9);
+        g.textAlign = 'left';
+        g.restore();
+      }
+    }
+  }
+};
+
+/* ================ 4. EXPLOSIONS DES PROJECTILES ======================
+   Grenades et lance-grenades : la balle du moteur sert de projectile, et
+   l'explosion est ajoutée là où elle s'arrête (mur, cible, fin de portée).
+   ===================================================================== */
+MODEJEU.exploser = function (Gm, b) {
+  const r = b.explose || 110;
+  Gm.fx.explosion(b.x, b.y);
+  Gm.cam.shake(9);
+  if (Gm.noise) Gm.noise(b.x, b.y, 900);
+  const P = Gm.player;
+  // le tireur n'est pas épargné : une grenade à ses pieds fait mal
+  const dp = dist(b.x, b.y, P.x, P.y);
+  if (!Gm.inside && dp < r) P.hurt((b.dmg || 70) * (1 - dp / r) * 0.9, Gm, 'explosion');
+  // joueurs du réseau : on déclare la touche, le serveur valide
+  if (NET.enPartie() && b.fromPlayer) {
+    for (const j of NET.joueurs.values()) {
+      if (j.mort || !j.vu || j.dedans) continue;
+      const d = dist(b.x, b.y, j.x, j.y);
+      if (d > r) continue;
+      NET.envoyer({
+        t: 'TOUCHE', cible: j.id, arme: Gm.player.weapon,
+        degats: (b.dmg || 70) * (1 - d / r)
+      });
+      Gm.fx.blood(j.x, j.y, 5);
+    }
+  }
+  // décor vivant et véhicules
+  const cibles = Gm.inside ? Gm.inside.int.cops : Gm.peds.concat(Gm.cops);
+  for (const p of cibles) {
+    if (p.dead) continue;
+    const d = dist(b.x, b.y, p.x, p.y);
+    if (d < r) p.hurt((b.dmg || 70) * (1 - d / r), Gm, b.fromPlayer ? 'player' : 'cop');
+  }
+  if (!Gm.inside) for (const v of Gm.vehicles) {
+    const d = dist(b.x, b.y, v.x, v.y);
+    if (d > r + 20) continue;
+    v.hp -= (b.dmg || 70) * (1 - d / (r + 20)) * 1.4;
+    if (v.hp <= 0 && !v.burning) { v.burning = 0.01; v.tueur = b.fromPlayer ? 'player' : null; }
+  }
+};
+
+/* ============== 5. GÉOMÉTRIE ENVOYÉE PAR LE CLIENT HÔTE ==============
+   L'hôte complète la géométrie d'origine (apparitions, circuit,
+   extraction) avec ce dont les deux nouveaux modes ont besoin.
+   ===================================================================== */
+MODEJEU.geometrieSupplementaire = function () {
+  if (!G || !G.world) return null;
+  const W = G.world;
+  const sur = (x, y) => !W.water.isWater(x, y) && !W.buildingAt(x, y) &&
+    x > 150 && y > 150 && x < CFG.SIZE - 150 && y < CFG.SIZE - 150;
+  const surRoute = (x, y) => { const d = W.nearRoad(x, y, 220); return d >= 0 && d < 40; };
+  const out = {};
+
+  /* --- arène du mode battle --- */
+  ARENE.definir(G.graineDemandee === undefined ? SEED : G.graineDemandee, G);
+  const a = ARENE.pourServeur();
+  if (a) out.arene = a;
+
+  /* --- départs de la course poursuite : un point par biome habité --- */
+  const parBiome = {};
+  for (let essai = 0; essai < 4000; essai++) {
+    const x = Math.random() * CFG.SIZE, y = Math.random() * CFG.SIZE;
+    if (!sur(x, y) || !surRoute(x, y)) continue;
+    const b = Biome.at(x, y);
+    if (parBiome[b]) continue;
+    parBiome[b] = { x: Math.round(x), y: Math.round(y), nom: b };
+    if (Object.keys(parBiome).length >= 4) break;
+  }
+  const biomes = Object.values(parBiome);
+  if (biomes.length) {
+    out.departs = biomes.slice();
+    /* Zones d'extraction : un point dans CHAQUE biome, pour que le
+       serveur en choisisse un loin du départ — la carte doit se
+       traverser.                                                       */
+    out.extractions = biomes.map(p => ({ x: p.x, y: p.y, r: 200, nom: p.nom }));
+  }
+
+  /* --- barrages : des carrefours d'axes principaux --- */
+  const noeuds = (W.nodes || []).filter(n => n.links && n.links.length >= 3);
+  const barrages = [];
+  for (const n of noeuds) {
+    if (barrages.length >= 14) break;
+    if (barrages.some(b => dist2(b.x, b.y, n.x, n.y) < 900 * 900)) continue;
+    barrages.push({ x: Math.round(n.x), y: Math.round(n.y) });
+  }
+  if (barrages.length) out.barrages = barrages;
+
+  /* --- raccourcis : chemins de terre et passages hors des grands axes --- */
+  const raccourcis = [];
+  for (const r of (W.roads || [])) {
+    if (raccourcis.length >= 12) break;
+    if (!r.terre && r.type !== 'ruelle') continue;
+    const p = r.pts[Math.floor(r.pts.length / 2)];
+    if (!p || !sur(p.x, p.y)) continue;
+    if (raccourcis.some(q => dist2(q.x, q.y, p.x, p.y) < 700 * 700)) continue;
+    raccourcis.push({ x: Math.round(p.x), y: Math.round(p.y), nom: r.terre ? 'Chemin de terre' : 'Ruelle' });
+  }
+  // à défaut, des quais : le trajet en bateau est aussi un raccourci
+  for (const d of (W.docks || [])) {
+    if (raccourcis.length >= 12) break;
+    raccourcis.push({ x: Math.round(d.x || d.cx || 0), y: Math.round(d.y || d.cy || 0), nom: 'Ponton' });
+  }
+  if (raccourcis.length) out.raccourcis = raccourcis.filter(r => r.x && r.y);
+
+  /* --- caisses spéciales de la variante « sous conditions » --- */
+  const caisses = [];
+  for (let essai = 0; essai < 2500 && caisses.length < 8; essai++) {
+    const x = Math.random() * CFG.SIZE, y = Math.random() * CFG.SIZE;
+    if (!sur(x, y)) continue;
+    if (caisses.some(c => dist2(c.x, c.y, x, y) < 1200 * 1200)) continue;
+    caisses.push({ x: Math.round(x), y: Math.round(y) });
+  }
+  if (caisses.length) out.caisses = caisses;
+  return out;
+};
+
+/* ================== 6. BRANCHEMENTS SUR LE RÉSEAU ==================== */
+
+/* --- réception : deux nouveaux types de messages --- */
+const _recevoirMJ = Reseau.prototype.recevoir;
+Reseau.prototype.recevoir = function (m) {
+  if (m.t === 'MODE_INIT') { MODEJEU.demarrer(m); return; }
+  if (m.t === 'MODE') { MODEJEU.majEtat(m); return; }
+  _recevoirMJ.call(this, m);
+};
+
+/* --- événements : on tente d'abord ceux des deux modes --- */
+const _evenementMJ = Reseau.prototype.evenement;
+Reseau.prototype.evenement = function (type, d) {
+  if (MODEJEU.evenement(type, d)) return;
+  _evenementMJ.call(this, type, d);
+};
+
+/* --- CREATE : on y glisse les options des deux nouveaux modes --- */
+const _envoyerMJ = Reseau.prototype.envoyer;
+Reseau.prototype.envoyer = function (o) {
+  if (o && o.t === 'CREATE') Object.assign(o, LOBBY.optionsModes());
+  if (o && o.t === 'GEOMETRIE') {
+    const sup = MODEJEU.geometrieSupplementaire();
+    if (sup) Object.assign(o, sup);
+  }
+  return _envoyerMJ.call(this, o);
+};
+
+/* --- sortie de partie : on range le décor de l'arène --- */
+const _demarrerPartieMJ = Reseau.prototype.demarrerPartie;
+Reseau.prototype.demarrerPartie = function (m) {
+  if (MODEJEU.mode && MODEJEU.mode !== m.mode) MODEJEU.reinitialiser(G);
+  _demarrerPartieMJ.call(this, m);
+};
+const _deconnecterMJ = Reseau.prototype.deconnecter;
+Reseau.prototype.deconnecter = function () {
+  MODEJEU.reinitialiser(G);
+  _deconnecterMJ.call(this);
+};
+
+/* ================= 7. BRANCHEMENTS SUR LE MOTEUR ===================== */
+
+/* --- projectiles explosifs : on marque la balle à sa naissance --- */
+const _spawnBulletMJ = Game.prototype.spawnBullet;
+Game.prototype.spawnBullet = function (x, y, ang, W, owner) {
+  _spawnBulletMJ.call(this, x, y, ang, W, owner);
+  if (!W || !W.explose) return;
+  const b = this.bullets[this.bullets.length - 1];
+  if (b) b.explose = W.explose;
+};
+/* --- et on la fait exploser là où elle a disparu --- */
+const _updateBulletsMJ = Game.prototype.updateBullets;
+Game.prototype.updateBullets = function (dt) {
+  const avant = this.bullets.filter(b => b.explose);
+  _updateBulletsMJ.call(this, dt);
+  for (const b of avant) if (this.bullets.indexOf(b) < 0) MODEJEU.exploser(this, b);
+};
+/* --- pistolet silencieux : aucun bruit, donc aucune panique --- */
+const _noiseMJ = Game.prototype.noise;
+Game.prototype.noise = function (x, y, r) {
+  /* En course poursuite, les civils ne réagissent pas aux combats : la
+     ville sert de décor et d'obstacle, pas de témoin.                 */
+  if (MODEJEU.estPoursuite()) return;
+  if (this.player && WEAPONS[this.player.weapon] && WEAPONS[this.player.weapon].discret &&
+    dist2(x, y, this.player.x, this.player.y) < 40 * 40) return;
+  _noiseMJ.call(this, x, y, r);
+};
+
+/* --- boucle : confinement, ramassage, chiffres du panneau véhicule --- */
+const _updateMJ = Game.prototype.update;
+Game.prototype.update = function (dt) {
+  const I = this.input;
+  if (MODEJEU.actif() && !NET.saisie) {
+    /* Chiffres : choix du véhicule de départ, puis armes 6 à 9 pour les
+       trouvailles de l'arène (1 à 5 gardent leur rôle d'origine).     */
+    if (MODEJEU.choixVeh) {
+      for (let i = 1; i <= MODEJEU.choixVeh.liste.length; i++)
+        if (I.hit('Digit' + i)) { MODEJEU.prendreVehicule(MODEJEU.choixVeh.liste[i - 1]); break; }
+    } else if (MODEJEU.estBattle()) {
+      const P = this.player;
+      const possedees = WORDER.filter(k => P.owned[k] && k !== 'fists');
+      for (let i = 1; i <= Math.min(9, possedees.length); i++)
+        if (I.hit('Digit' + i)) { P.weapon = possedees[i - 1]; break; }
+    }
+  }
+  _updateMJ.call(this, dt);
+  MODEJEU.avancer(dt);
+};
+
+/* --- touche F : ramasser une arme avant toute autre interaction --- */
+const _interagirMJ = Extensions.prototype.interagir;
+Extensions.prototype.interagir = function () {
+  if (MODEJEU.interagir()) return;
+  _interagirMJ.call(this);
+};
+const _majTipMJ = Extensions.prototype.majTip;
+Extensions.prototype.majTip = function () {
+  _majTipMJ.call(this);
+  const tip = MODEJEU.infobulle();
+  if (tip) this.G.tip = tip;
+};
+
+/* --- rendu : décor et repères au sol, puis HUD --- */
+const _drawMondeMJ = Extensions.prototype.drawMonde;
+Extensions.prototype.drawMonde = function (g, v) {
+  _drawMondeMJ.call(this, g, v);
+  MODEJEU.dessinerMonde(g, v);
+};
+const _drawHudMJ = Extensions.prototype.drawHud;
+Extensions.prototype.drawHud = function (g) {
+  _drawHudMJ.call(this, g);
+  MODEJEU.dessinerHud(g);
+};
+const _drawCarteMJ = Extensions.prototype.drawCarte;
+Extensions.prototype.drawCarte = function (g, Gm, mx, my, k, span, plein) {
+  _drawCarteMJ.call(this, g, Gm, mx, my, k, span, plein);
+  MODEJEU.dessinerCarte(g, mx, my, k, plein);
+};
+
+/* --- grande carte (M) : en battle, on ne montre que l'arène --- */
+const _mmFullMJ = Minimap.prototype.drawFull;
+Minimap.prototype.drawFull = function (g, Gm) {
+  if (!MODEJEU.estBattle() || !ARENE.rect) { _mmFullMJ.call(this, g, Gm); return; }
+  const R = ARENE.rect, W = Gm.cw, H = Gm.ch;
+  const S = Math.max(200, Math.min(W - 300, H - 80));
+  const X = Math.max(8, (W - S) / 2 - 100), Y = Math.max(8, (H - S) / 2);
+  const k = S / R.w;
+  const mx = x => X + (x - R.x) * k, my = y => Y + (y - R.y) * k;
+  g.save();
+  g.fillStyle = 'rgba(8,12,18,.92)';
+  rr(g, X, Y, S, S, 14); g.fill();
+  g.strokeStyle = 'rgba(160,180,210,.3)'; g.lineWidth = 1.5; g.stroke();
+  // bâtiments de l'enceinte
+  g.fillStyle = 'rgba(120,134,152,.5)';
+  for (const b of Gm.world.buildings) {
+    if (b.cx < R.x || b.cx > R.x + R.w || b.cy < R.y || b.cy > R.y + R.h) continue;
+    g.fillRect(mx(b.x), my(b.y), b.w * k, b.h * k);
+  }
+  // décor de l'arène
+  for (const d of ARENE.decor) {
+    g.fillStyle = d.kind === 'conteneur' ? 'rgba(216,169,58,.7)'
+      : d.kind === 'epave' ? 'rgba(90,96,104,.8)'
+        : d.kind === 'escalier' ? 'rgba(107,114,128,.8)' : 'rgba(214,222,236,.3)';
+    g.fillRect(mx(d.x), my(d.y), Math.max(2, d.w * k), Math.max(2, d.h * k));
+  }
+  // joueur, bases, armes, autres joueurs
+  MODEJEU.dessinerCarte(g, mx, my, k, true);
+  NET.dessinerCarte(g, mx, my, k, true);
+  const P = Gm.player;
+  g.fillStyle = '#ffffff';
+  g.beginPath(); g.arc(mx(P.x), my(P.y), 5, 0, TAU); g.fill();
+  g.font = '800 12px ' + ART.hud.police;
+  g.fillStyle = '#9ec5ff';
+  g.fillText('ARÈNE — ' + R.w + ' x ' + R.h + ' px', X + 14, Y + 22);
+  g.restore();
+};
+
+/* --- bâtiments : on n'entre pas dans un commerce au milieu d'une manche --- */
+const _startEnterMJ = Game.prototype.startEnter;
+Game.prototype.startEnter = function (b) {
+  if (MODEJEU.estBattle()) { this.notify('Pas d’intérieur dans l’arène'); return; }
+  _startEnterMJ.call(this, b);
+};
+/* --- réapparition : en compétition, on repart à l'identique, sans
+       passer par la clinique et SANS perdre d'argent. Le serveur replace
+       ensuite le joueur et lui rend son équipement de manche. --- */
+const _respawnMJ = Game.prototype.respawn;
+Game.prototype.respawn = function () {
+  if (!MODEJEU.actif()) { _respawnMJ.call(this); return; }
+  const argent = this.player.money;
+  _respawnMJ.call(this);
+  this.player.money = argent;                 // une manche ne coûte rien
+  const P = this.player;
+  if (MODEJEU.estBattle()) { P.owned = { fists: true, knife: true }; P.weapon = 'knife'; }
+  else { P.owned = { fists: true, pistol: true }; P.weapon = 'pistol'; P.ammo.pistol = 24; }
+};
+/* --- « vous vous réveillez à la clinique » n'a pas de sens ici --- */
+const _notifyMJ = Game.prototype.notify;
+Game.prototype.notify = function (txt) {
+  if (MODEJEU.actif() && /clinique|recruteur/i.test(String(txt))) return;
+  _notifyMJ.call(this, txt);
+};
+/* --- recherche policière : muette dans les deux modes --- */
+const _addWantedMJ = Game.prototype.addWanted;
+Game.prototype.addWanted = function (points, texte) {
+  if (MODEJEU.actif()) return;
+  _addWantedMJ.call(this, points, texte);
+};
+/* --- stations-service indestructibles en course poursuite --- */
+const _pompeMJ = Game.prototype.exploserPompe;
+Game.prototype.exploserPompe = function (p, n) {
+  if (MODEJEU.estPoursuite()) { p.fuite = 0; p.hp = Math.max(p.hp, 1); return; }
+  _pompeMJ.call(this, p, n);
+};
+
+/* =============== 9. GEL DES SYSTÈMES DE LA PARTIE SOLO ===============
+   Ces deux modes sont des compétitions, pas la campagne : quêtes,
+   territoires de gangs, contrats, revenus de commerces, presse et
+   téléphone n'ont rien à y faire. On ne les supprime pas — on les met
+   en sommeil le temps de la partie, et ils repartent intacts en solo.
+   ===================================================================== */
+function gelerSysteme(K, methodes, quand) {
+  if (typeof K !== 'function' || !K.prototype) return;
+  for (const m of methodes) {
+    const o = K.prototype[m];
+    if (typeof o !== 'function') continue;
+    K.prototype[m] = function () { return quand() ? undefined : o.apply(this, arguments); };
+  }
+}
+const enCompetition = () => MODEJEU.actif();
+const dansArene = () => MODEJEU.estBattle();
+
+// systèmes narratifs et économiques : muets dans les deux modes
+gelerSysteme(typeof Territoires !== 'undefined' ? Territoires : null,
+  ['update', 'draw', 'dessinerHud', 'dessinerCarte'], enCompetition);
+gelerSysteme(typeof Campagne !== 'undefined' ? Campagne : null, ['update', 'draw'], enCompetition);
+gelerSysteme(typeof Montagne !== 'undefined' ? Montagne : null, ['update'], enCompetition);
+gelerSysteme(typeof MissionManager !== 'undefined' ? MissionManager : null, ['update'], enCompetition);
+gelerSysteme(typeof Evenements !== 'undefined' ? Evenements : null, ['update', 'draw'], enCompetition);
+gelerSysteme(typeof Contacts !== 'undefined' ? Contacts : null, ['update', 'draw', 'majMission'], enCompetition);
+gelerSysteme(typeof Economie !== 'undefined' ? Economie : null, ['update'], enCompetition);
+gelerSysteme(typeof Presse !== 'undefined' ? Presse : null, ['update'], enCompetition);
+gelerSysteme(typeof Telephone !== 'undefined' ? Telephone : null, ['update', 'dessiner', 'dessinerEntrant'], enCompetition);
+// décor vivant de la ville : coupé dans l'arène seulement
+gelerSysteme(typeof Routines !== 'undefined' ? Routines : null, ['update'], dansArene);
+gelerSysteme(typeof Exploration !== 'undefined' ? Exploration : null, ['update', 'draw'], dansArene);
+/* Étoiles de recherche : il n'y a pas de police à craindre ici, la
+   rangée d'étoiles vides n'a plus lieu d'être.                        */
+const _etoileMJ = HUD.prototype.star;
+HUD.prototype.star = function (g, x, y, r, col, glow) {
+  if (MODEJEU.actif()) return;
+  _etoileMJ.call(this, g, x, y, r, col, glow);
+};
+/* Enseignes des commerces : hors sujet dans une arène fermée. */
+const _signeMJ = Game.prototype.drawSign;
+Game.prototype.drawSign = function (g, b, dn) {
+  if (MODEJEU.estBattle()) return;
+  _signeMJ.call(this, g, b, dn);
+};
+
+/* ============== 8. LOBBY : DEUX TUILES, OPTIONS, CAMPS ===============
+   Le panneau multijoueur d'origine n'est pas réécrit : on lui ajoute
+   deux tuiles de mode, les champs d'options propres à chacun, les
+   filtres de la liste de salles et — pour la seule course poursuite —
+   le panneau de choix de camp.
+   ===================================================================== */
+
+/* Styles du module, injectés une fois : le fichier reste autonome. */
+(function styleModes() {
+  const s = document.createElement('style');
+  s.textContent = [
+    '.mj-tuiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}',
+    '.mj-tuile{position:relative;text-align:left;cursor:pointer;border:1px solid rgba(160,180,210,.22);',
+    'border-radius:14px;padding:13px 15px;background:linear-gradient(135deg,rgba(18,24,34,.92),rgba(12,16,24,.92));',
+    'transition:border-color .15s,transform .15s}',
+    '.mj-tuile:hover{transform:translateY(-2px)}',
+    '.mj-tuile.on{border-color:rgba(255,192,74,.75);box-shadow:0 0 0 1px rgba(255,192,74,.3) inset}',
+    '.mj-tuile h3{margin:0 0 2px;font-size:15px;letter-spacing:.06em}',
+    '.mj-tuile .mj-sous{font-size:11px;color:var(--muet);line-height:1.5;margin-bottom:8px}',
+    '.mj-tuile .mj-chiffres{display:flex;gap:14px;font-size:10px;color:#9ec5ff;letter-spacing:.05em}',
+    '.mj-tuile .mj-chiffres b{display:block;font-size:16px;color:#e6eefc}',
+    '.mj-camps{margin-top:14px;border-top:1px solid rgba(160,180,210,.18);padding-top:12px}',
+    '.mj-camps h2{margin:0 0 8px}',
+    '.mj-camps .mj-rangee{display:grid;grid-template-columns:1fr 1fr;gap:10px}',
+    '.mj-camp{cursor:pointer;border-radius:12px;padding:11px 12px;text-align:center;font-weight:800;',
+    'letter-spacing:.07em;font-size:12px;border:2px solid transparent;background:rgba(18,24,34,.9);color:#c6d8ee}',
+    '.mj-camp.fug{border-color:rgba(255,159,67,.5);color:#ff9f43}',
+    '.mj-camp.chas{border-color:rgba(192,138,255,.5);color:#c08aff}',
+    '.mj-camp.actif{background:rgba(255,255,255,.08);box-shadow:0 0 0 2px rgba(255,255,255,.2) inset}',
+    '.mj-camp span{display:block;font-size:19px;margin-top:3px;color:#e6eefc}',
+    '.mj-equilibre{margin-top:9px;font-size:11px;line-height:1.5}',
+    '.mj-equilibre.ok{color:#7ae582}.mj-equilibre.ko{color:#ff9f43}',
+    '.mj-titre{display:inline-block;margin-left:6px;font-size:9px;letter-spacing:.08em;',
+    'padding:1px 6px;border-radius:6px;background:rgba(255,212,94,.16);color:#ffd45e}',
+    /* le bandeau de manche ou de traque occupe le haut de l'écran :
+       le voyant réseau et le bandeau de message descendent d'autant */
+    '#mp-hud.mj-modes #mp-voyant{top:92px}',
+    '#mp-hud.mj-modes #mp-bandeau{top:128px}'
+  ].join('');
+  document.head.appendChild(s);
+})();
+
+/* Deux modes à mettre en avant, dans l'ordre des tuiles. */
+const MJ_TUILES = [
+  {
+    id: 'battle', titre: 'BATTLE', sous: 'Affrontement par manches',
+    desc: 'Arène dédiée et dense, armes aléatoires à chaque manche, deux équipes formées par le serveur.'
+  },
+  {
+    id: 'poursuite', titre: 'COURSE POURSUITE', sous: 'Traque',
+    desc: 'Monde ouvert sans police. Fugitifs contre Chasseurs — le camp se choisit dans le salon.'
+  }
+];
+
+/* Meilleur score personnel, par mode, gardé en local. */
+LobbyUI.prototype.meilleurScore = function (mode, score) {
+  const cle = 'll_best_' + mode;
+  let best = 0;
+  try { best = parseInt(localStorage.getItem(cle), 10) || 0; } catch (e) { }
+  if (score !== undefined && score > best) {
+    best = score;
+    try { localStorage.setItem(cle, String(best)); } catch (e) { }
+  }
+  return best;
+};
+
+/* ------------------- mise en place de l'interface -------------------- */
+LobbyUI.prototype.installerModes = function () {
+  const el = id => this.el(id);
+  if (!el('mp-ecran-salles') || el('mj-tuiles')) return;
+
+  /* --- 1. les deux options supplémentaires dans les listes de mode --- */
+  for (const id of ['mp-mode', 'mp-filtre']) {
+    const sel = el(id);
+    if (!sel) continue;
+    for (const t of MJ_TUILES) {
+      if ([...sel.options].some(o => o.value === t.id)) continue;
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = t.titre + ' — ' + t.sous;
+      sel.appendChild(o);
+    }
+  }
+
+  /* --- 2. les tuiles, en tête de l'écran des salles --- */
+  const tuiles = document.createElement('div');
+  tuiles.className = 'mj-tuiles';
+  tuiles.id = 'mj-tuiles';
+  tuiles.innerHTML = MJ_TUILES.map(t =>
+    '<div class="mj-tuile" data-mj="' + t.id + '">' +
+    '<h3>' + t.titre + '</h3>' +
+    '<div class="mj-sous">' + t.sous + ' — ' + t.desc + '</div>' +
+    '<div class="mj-chiffres">' +
+    '<div><b id="mj-' + t.id + '-salles">0</b>SALLES</div>' +
+    '<div><b id="mj-' + t.id + '-joueurs">0</b>EN LIGNE</div>' +
+    '<div><b id="mj-' + t.id + '-best">0</b>MEILLEUR SCORE</div>' +
+    '</div></div>').join('');
+  const ecran = el('mp-ecran-salles');
+  ecran.insertBefore(tuiles, ecran.firstChild);
+  tuiles.querySelectorAll('[data-mj]').forEach(t => {
+    t.onclick = () => {
+      const id = t.dataset.mj;
+      el('mp-filtre').value = id;
+      el('mp-mode').value = id;
+      this.majFormulaire();
+      this.majTuiles();
+      if (NET.connecte()) NET.envoyer({ t: 'LIST', mode: id });
+    };
+  });
+
+  /* --- 3. filtres de la liste : effectif et état --- */
+  const liste = ecran.querySelector('.mp-liste');
+  if (liste && !el('mj-filtre-taille')) {
+    const box = document.createElement('div');
+    box.innerHTML =
+      '<div class="mp-champ"><label for="mj-filtre-taille">EFFECTIF</label>' +
+      '<select id="mj-filtre-taille">' +
+      '<option value="">Toutes les tailles</option>' +
+      '<option value="4">4 joueurs (2v2)</option>' +
+      '<option value="6">6 joueurs (3v3)</option>' +
+      '<option value="8">8 joueurs (4v4)</option>' +
+      '<option value="10">10 joueurs (5v5)</option>' +
+      '</select></div>' +
+      '<div class="mp-champ"><label for="mj-filtre-etat">ÉTAT</label>' +
+      '<select id="mj-filtre-etat">' +
+      '<option value="">En attente et en cours</option>' +
+      '<option value="attente">En attente seulement</option>' +
+      '<option value="jeu">En cours seulement</option>' +
+      '</select></div>';
+    liste.parentNode.insertBefore(box, liste);
+    const rafraichir = () => NET.envoyer({ t: 'LIST', mode: el('mp-filtre').value });
+    el('mj-filtre-taille').onchange = rafraichir;
+    el('mj-filtre-etat').onchange = rafraichir;
+  }
+
+  /* --- 4. champs d'options des deux modes, dans le formulaire --- */
+  const form = el('mp-mdp') ? el('mp-mdp').parentNode.parentNode : null;
+  if (form && !el('mj-opt-battle')) {
+    const b = document.createElement('div');
+    b.id = 'mj-opt-battle';
+    b.style.display = 'none';
+    b.innerHTML =
+      '<div class="mp-champ"><label for="mj-manches">MANCHES POUR GAGNER</label>' +
+      '<select id="mj-manches"><option value="3" selected>3 manches</option>' +
+      '<option value="5">5 manches</option><option value="7">7 manches</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-duree-manche">DURÉE PAR MANCHE</label>' +
+      '<select id="mj-duree-manche"><option value="90">90 secondes</option>' +
+      '<option value="120" selected>2 minutes</option><option value="180">3 minutes</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-format-b">NOMBRE DE JOUEURS</label>' +
+      '<select id="mj-format-b"><option value="2v2">2 contre 2</option>' +
+      '<option value="3v3">3 contre 3</option><option value="4v4" selected>4 contre 4</option>' +
+      '<option value="5v5">5 contre 5</option></select></div>' +
+      '<div class="mp-champ coche"><input id="mj-legendaires" type="checkbox" checked>' +
+      '<label for="mj-legendaires">Armes légendaires</label></div>';
+    const p = document.createElement('div');
+    p.id = 'mj-opt-poursuite';
+    p.style.display = 'none';
+    p.innerHTML =
+      '<div class="mp-champ"><label for="mj-duree-max">DURÉE MAXIMALE</label>' +
+      '<select id="mj-duree-max"><option value="480">8 minutes</option>' +
+      '<option value="600" selected>10 minutes</option><option value="900">15 minutes</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-avance">AVANCE DES FUGITIFS</label>' +
+      '<select id="mj-avance"><option value="20">20 secondes</option>' +
+      '<option value="30" selected>30 secondes</option><option value="45">45 secondes</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-maj">MISE À JOUR MINIMAP</label>' +
+      '<select id="mj-maj"><option value="10">toutes les 10 s</option>' +
+      '<option value="15" selected>toutes les 15 s</option><option value="30">toutes les 30 s</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-variante">VARIANTE D’EXTRACTION</label>' +
+      '<select id="mj-variante"><option value="" selected>Aléatoire</option>' +
+      '<option value="fixe">Point fixe</option><option value="mobile">Point mobile</option>' +
+      '<option value="multi">Multi-points</option><option value="minutee">Extraction minutée</option>' +
+      '<option value="conditions">Extraction sous conditions</option></select></div>' +
+      '<div class="mp-champ"><label for="mj-format-p">NOMBRE DE JOUEURS</label>' +
+      '<select id="mj-format-p"><option value="2v2">2 contre 2</option>' +
+      '<option value="3v3">3 contre 3</option><option value="4v4" selected>4 contre 4</option></select></div>' +
+      '<p class="mp-mode-desc">Le camp (Fugitif ou Chasseur) ne se choisit pas ici : chaque joueur le prend dans le salon, pour cette partie seulement.</p>';
+    const ancre = el('mp-creer').parentNode;
+    form.insertBefore(b, ancre);
+    form.insertBefore(p, ancre);
+  }
+
+  /* --- 5. panneau de choix de camp, dans le salon d'attente --- */
+  if (!el('mj-camps')) {
+    const hote = el('mp-salon-joueurs');
+    if (hote) {
+      const c = document.createElement('div');
+      c.className = 'mj-camps';
+      c.id = 'mj-camps';
+      c.style.display = 'none';
+      c.innerHTML =
+        '<h2>Choix de camp — cette partie seulement</h2>' +
+        '<div class="mj-rangee">' +
+        '<div class="mj-camp fug" id="mj-camp-1">FUGITIFS<span id="mj-camp-1-n">0</span></div>' +
+        '<div class="mj-camp chas" id="mj-camp-2">CHASSEURS<span id="mj-camp-2-n">0</span></div>' +
+        '</div><div class="mj-equilibre" id="mj-equilibre"></div>';
+      hote.parentNode.insertBefore(c, hote.nextSibling);
+      el('mj-camp-1').onclick = () => NET.envoyer({ t: 'CAMP', camp: 1 });
+      el('mj-camp-2').onclick = () => NET.envoyer({ t: 'CAMP', camp: 2 });
+    }
+  }
+  this.majTuiles();
+};
+
+/* Chiffres des tuiles : salles actives, joueurs en ligne, record perso. */
+LobbyUI.prototype.majTuiles = function (salles) {
+  if (!this.el('mj-tuiles')) return;
+  const choisi = this.el('mp-filtre') ? this.el('mp-filtre').value : '';
+  for (const t of MJ_TUILES) {
+    const l = (salles || this.dernieresSalles || []).filter(s => s.mode === t.id);
+    const nj = l.reduce((n, s) => n + s.joueurs, 0);
+    const maj = (id, v) => { const e = this.el(id); if (e) e.textContent = String(v); };
+    maj('mj-' + t.id + '-salles', l.length);
+    maj('mj-' + t.id + '-joueurs', nj);
+    maj('mj-' + t.id + '-best', this.meilleurScore(t.id));
+    const tuile = this.el('mj-tuiles').querySelector('[data-mj="' + t.id + '"]');
+    if (tuile) tuile.className = 'mj-tuile' + (choisi === t.id ? ' on' : '');
+  }
+};
+
+/* Options des deux modes, ajoutées au message CREATE. */
+LobbyUI.prototype.optionsModes = function () {
+  const v = id => { const e = this.el(id); return e ? e.value : ''; };
+  const coche = id => { const e = this.el(id); return e ? e.checked : true; };
+  const mode = v('mp-mode');
+  if (mode === 'battle') return {
+    manches: parseInt(v('mj-manches'), 10) || 3,
+    dureeManche: parseInt(v('mj-duree-manche'), 10) || 120,
+    legendaires: coche('mj-legendaires'),
+    format: v('mj-format-b') || '4v4',
+    trafic: false                  // aucune circulation dans l'arène
+  };
+  if (mode === 'poursuite') return {
+    dureeMax: parseInt(v('mj-duree-max'), 10) || 600,
+    avance: parseInt(v('mj-avance'), 10) || 30,
+    majMinimap: parseInt(v('mj-maj'), 10) || 15,
+    variante: v('mj-variante') || '',
+    format: v('mj-format-p') || '4v4',
+    policeDiff: 0                  // aucune police dans ce mode
+  };
+  return {};
+};
+
+/* ------------------------- branchements lobby ------------------------ */
+
+/* Mise en place : après le câblage d'origine. */
+const _installerMJ = LobbyUI.prototype.installer;
+LobbyUI.prototype.installer = function () {
+  _installerMJ.call(this);
+  this.installerModes();
+};
+
+/* Formulaire : on montre les bons champs et on verrouille ce qui n'a
+   pas de sens (équipes imposées, police absente).                     */
+const _majFormulaireMJ = LobbyUI.prototype.majFormulaire;
+LobbyUI.prototype.majFormulaire = function () {
+  _majFormulaireMJ.call(this);
+  const mode = this.el('mp-mode') ? this.el('mp-mode').value : '';
+  const b = this.el('mj-opt-battle'), p = this.el('mj-opt-poursuite');
+  if (b) b.style.display = mode === 'battle' ? 'block' : 'none';
+  if (p) p.style.display = mode === 'poursuite' ? 'block' : 'none';
+  if (mode === 'battle' || mode === 'poursuite') {
+    // le feu ami reste réglable, les équipes ne se décochent pas
+    const eq = this.el('mp-equipes');
+    if (eq) { eq.checked = true; eq.disabled = true; }
+    const pol = this.el('mp-police');
+    if (pol) { pol.value = '0'; pol.disabled = true; }
+    const tr = this.el('mp-trafic');
+    if (tr) { tr.checked = mode === 'poursuite'; tr.disabled = mode === 'battle'; }
+    if (mode === 'battle') { const f = this.el('mp-feuami'); if (f) f.checked = false; }
+    if (mode === 'poursuite') { const f = this.el('mp-feuami'); if (f) f.checked = true; }
+  } else {
+    const pol = this.el('mp-police');
+    if (pol) pol.disabled = false;
+    const tr = this.el('mp-trafic');
+    if (tr) tr.disabled = false;
+  }
+  this.majTuiles();
+};
+
+/* Liste des salles : on applique les filtres d'effectif et d'état, puis
+   on rafraîchit les tuiles.                                            */
+const _majSallesMJ = LobbyUI.prototype.majSalles;
+LobbyUI.prototype.majSalles = function (salles) {
+  this.dernieresSalles = salles || [];
+  const taille = this.el('mj-filtre-taille') ? this.el('mj-filtre-taille').value : '';
+  const etat = this.el('mj-filtre-etat') ? this.el('mj-filtre-etat').value : '';
+  let l = this.dernieresSalles;
+  if (taille) l = l.filter(s => s.max === parseInt(taille, 10));
+  if (etat === 'attente') l = l.filter(s => s.phase === 'attente' || s.phase === 'decompte');
+  else if (etat === 'jeu') l = l.filter(s => s.phase === 'jeu');
+  _majSallesMJ.call(this, l);
+  this.majTuiles(this.dernieresSalles);
+};
+
+/* Salon : panneau de camp (course poursuite), état de l'arène (battle),
+   titres de 24 h sous les pseudos.                                     */
+const _majSalonMJ = LobbyUI.prototype.majSalon;
+LobbyUI.prototype.majSalon = function (s) {
+  _majSalonMJ.call(this, s);
+  if (!s) return;
+  const camps = this.el('mj-camps');
+  const mien = (s.joueurs || []).find(j => j.id === NET.moi);
+
+  /* --- choix de camp : course poursuite uniquement --- */
+  if (camps) {
+    const visible = s.mode === 'poursuite' && s.phase !== 'jeu';
+    camps.style.display = visible ? 'block' : 'none';
+    if (visible) {
+      const n = s.camps || { 1: 0, 2: 0, indecis: 0 };
+      this.el('mj-camp-1-n').textContent = String(n[1] || 0);
+      this.el('mj-camp-2-n').textContent = String(n[2] || 0);
+      this.el('mj-camp-1').className = 'mj-camp fug' + (mien && mien.camp === 1 ? ' actif' : '');
+      this.el('mj-camp-2').className = 'mj-camp chas' + (mien && mien.camp === 2 ? ' actif' : '');
+      const eq = this.el('mj-equilibre');
+      if (n.indecis > 0) {
+        eq.className = 'mj-equilibre ko';
+        eq.textContent = 'Fugitifs : ' + n[1] + ' — Chasseurs : ' + n[2] + ' · ' +
+          n.indecis + ' joueur(s) encore sans camp. Chacun choisit le sien avant le lancement.';
+      } else if (s.equilibre) {
+        eq.className = 'mj-equilibre ok';
+        eq.textContent = 'Fugitifs : ' + n[1] + ' — Chasseurs : ' + n[2] +
+          ' · équipes équilibrées, la partie peut être lancée.';
+      } else {
+        eq.className = 'mj-equilibre ko';
+        eq.textContent = 'Fugitifs : ' + n[1] + ' — Chasseurs : ' + n[2] +
+          ' · écart trop grand (un joueur d’écart au maximum). Des volontaires pour changer de côté ?';
+      }
+    }
+  }
+
+  /* --- informations propres aux deux modes --- */
+  const infos = this.el('mp-salon-infos');
+  if (infos && (s.mode === 'battle' || s.mode === 'poursuite')) {
+    const o = s.options || {};
+    let sup = '';
+    if (s.mode === 'battle') {
+      sup = '<br>Manches à gagner : <b>' + (o.manches || 3) + '</b>' +
+        ' · Durée par manche : <b>' + (o.dureeManche || 120) + ' s</b>' +
+        ' · Armes légendaires : <b>' + (o.legendaires === false ? 'non' : 'oui') + '</b>' +
+        ' · Arène : <b>' + (s.arenePrete ? 'tracée' : 'en attente de l’hôte') + '</b>';
+    } else {
+      const noms = {
+        '': 'aléatoire', fixe: 'point fixe', mobile: 'point mobile', multi: 'multi-points',
+        minutee: 'minutée', conditions: 'sous conditions'
+      };
+      sup = '<br>Durée max : <b>' + Math.round((o.dureeMax || 600) / 60) + ' min</b>' +
+        ' · Avance des Fugitifs : <b>' + (o.avance || 30) + ' s</b>' +
+        ' · Minimap : <b>toutes les ' + (o.majMinimap || 15) + ' s</b>' +
+        ' · Extraction : <b>' + (noms[o.variante || ''] || o.variante) + '</b>' +
+        ' · Police : <b>désactivée</b>';
+    }
+    infos.innerHTML += sup;
+  }
+
+  /* --- titres de 24 h accolés aux pseudos --- */
+  if (s.titres) {
+    const box = this.el('mp-salon-joueurs');
+    if (box) [...box.children].forEach((d, i) => {
+      const j = (s.joueurs || [])[i];
+      if (!j || !s.titres[j.id]) return;
+      const nom = d.querySelector('.nom');
+      if (nom && nom.innerHTML.indexOf('mj-titre') < 0)
+        nom.innerHTML += '<span class="mj-titre">' + this.echapper(s.titres[j.id]) + '</span>';
+    });
+  }
+};
+
+/* Classement final : camps, ratio, titres et manches gagnées. */
+const _majTableauMJ = LobbyUI.prototype.majTableau;
+LobbyUI.prototype.majTableau = function () {
+  _majTableauMJ.call(this);
+  if (!NET.enPartie() || !NET.classementFinal) return;
+  const mode = NET.init.mode;
+  if (mode !== 'battle' && mode !== 'poursuite') return;
+  const box = this.el('mp-scores-corps');
+  if (!box) return;
+  const lignes = NET.classementFinal.map(c =>
+    '<tr><td>' + c.place + '</td>' +
+    '<td><span style="color:' + this.echapper(c.couleur) + ';font-weight:800">' +
+    this.echapper(c.pseudo) + '</span>' +
+    (c.titre ? '<span class="mj-titre">' + this.echapper(c.titre) + '</span>' : '') + '</td>' +
+    '<td>' + this.echapper(c.camp || '') + '</td>' +
+    '<td>' + c.kills + '</td><td>' + c.morts + '</td>' +
+    '<td>' + (c.ratio === undefined ? '—' : c.ratio) + '</td>' +
+    '<td>' + c.score + '</td>' +
+    '<td>' + (c.mvp ? '★ ' + c.mvp : '') + '</td></tr>').join('');
+  box.innerHTML = '<table class="mp-tab"><thead><tr><th>#</th><th>JOUEUR</th><th>CAMP</th>' +
+    '<th>ÉLIM.</th><th>MORTS</th><th>RATIO</th><th>SCORE</th><th>MVP</th></tr></thead>' +
+    '<tbody>' + lignes + '</tbody></table>';
+};
+
+/* Fin de partie : on retient le meilleur score du mode pour la tuile. */
+const _finPartieMJ = Reseau.prototype.finPartie;
+Reseau.prototype.finPartie = function (m) {
+  _finPartieMJ.call(this, m);
+  const mode = this.init ? this.init.mode : '';
+  if (mode !== 'battle' && mode !== 'poursuite') return;
+  const mien = (m.classement || []).find(c => c.pseudo === this.prefs.pseudo);
+  if (mien) LOBBY.meilleurScore(mode, mien.score || 0);
+  LOBBY.majTuiles();
+};
+
+/* Le bouton LANCER refuse les camps déséquilibrés sans aller-retour. */
+const _montrerMJ = LobbyUI.prototype.montrer;
+LobbyUI.prototype.montrer = function (ecran) {
+  _montrerMJ.call(this, ecran);
+  if (ecran === 'salles') this.majTuiles();
+};
+
 /* =============================== DÉMARRAGE ============================ */
 let G = null;
 const $ = id => document.getElementById(id);

@@ -140,6 +140,12 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const alea = (a, b) => a + Math.random() * (b - a);
 const pioche = t => t[Math.floor(Math.random() * t.length)];
 const nombre = (v, def) => (typeof v === 'number' && isFinite(v)) ? v : def;
+/* Valeur imposée à une liste de choix : tout le reste retombe sur le
+   défaut. Utile pour les options de salle, qui viennent du client.    */
+const parmi = (v, choix, def) => {
+  const n = Math.round(nombre(v, NaN));
+  return choix.indexOf(n) >= 0 ? n : def;
+};
 
 /* Journal horodaté. Toute action significative y passe : connexion,
    achat, mort, quête, valeur rejetée. Un seul format, facile à grep.   */
@@ -1052,6 +1058,15 @@ class Salle {
     if (o.trafic !== undefined) this.options.trafic = !!o.trafic;
     if (o.policeDiff !== undefined) this.options.policeDiff = clamp(nombre(o.policeDiff, 1), 0, 2);
     if (o.tours !== undefined) this.options.tours = clamp(Math.round(nombre(o.tours, 2)), 1, 9);
+    // options des modes battle et course poursuite
+    if (o.manches !== undefined) this.options.manches = parmi(o.manches, [3, 5, 7], this.options.manches);
+    if (o.dureeManche !== undefined) this.options.dureeManche = parmi(o.dureeManche, [90, 120, 180], this.options.dureeManche);
+    if (o.legendaires !== undefined) this.options.legendaires = !!o.legendaires;
+    if (o.dureeMax !== undefined) this.options.dureeMax = parmi(o.dureeMax, [480, 600, 900], this.options.dureeMax);
+    if (o.avance !== undefined) this.options.avance = parmi(o.avance, [20, 30, 45], this.options.avance);
+    if (o.majMinimap !== undefined) this.options.majMinimap = parmi(o.majMinimap, [10, 15, 30], this.options.majMinimap);
+    if (o.variante !== undefined)
+      this.options.variante = typeof o.variante === 'string' && EXTRACTIONS.some(e => e.id === o.variante) ? o.variante : '';
     if (o.meteoFixe !== undefined) {
       this.options.meteoFixe = typeof o.meteoFixe === 'string' && METEO_SUITES[o.meteoFixe] ? o.meteoFixe : '';
       this.meteoFixe = !!this.options.meteoFixe;
@@ -1067,6 +1082,1185 @@ class Salle {
     cible.expulser('Expulsé par l’hôte de la salle');
   }
 }
+
+/* =======================================================================
+   MODES BATTLE ET COURSE POURSUITE
+   -----------------------------------------------------------------------
+   Deux modes ajoutés sans toucher au reste du serveur : tout passe par
+   de nouvelles méthodes et par l'encapsulation des anciennes
+   (`const _x = Salle.prototype.m; Salle.prototype.m = function(){…}`).
+
+   Partage des responsabilités, inchangé : le serveur arbitre les joueurs
+   (manches, camps, armes ramassées, traque, extraction, scores) ; la
+   géométrie du décor — enceinte de l'arène, bases, emplacements d'armes,
+   points d'extraction, barrages, raccourcis — vient du client hôte, seul
+   à connaître la carte tirée de la graine.
+
+   RÈGLE DE CAMP : le choix d'un camp n'existe QUE dans le mode
+   « poursuite », et seulement dans le salon d'attente de cette salle. Il
+   n'est lié ni au compte, ni au pseudo, ni à une autre partie : chaque
+   salle repart d'une ardoise vierge. Les autres modes continuent de
+   répartir les équipes eux-mêmes (battle, bataille, police) ou de s'en
+   passer (coop, course).
+   ======================================================================= */
+
+/* ------------------------- armes supplémentaires ---------------------- */
+/* Miroir de la table du client : le serveur n'en a besoin que pour
+   valider dégâts, cadence et portée.                                   */
+Object.assign(ARMES, {
+  knife: { dmg: 26, rate: 0.45, portee: 62 },
+  silenced: { dmg: 17, rate: 0.33, portee: 540 },
+  assault: { dmg: 22, rate: 0.14, portee: 660 },
+  sniper: { dmg: 85, rate: 1.30, portee: 1500 },
+  glauncher: { dmg: 70, rate: 1.10, portee: 640 },
+  lmg: { dmg: 14, rate: 0.07, portee: 580 },
+  grenade: { dmg: 70, rate: 1.00, portee: 430 }
+});
+
+/* Raretés du mode battle. Les proportions sont celles demandées :
+   60 % commune, 30 % rare, 10 % légendaire.                            */
+const BATTLE_RARETES = {
+  commune: { col: '#c6d8ee', armes: ['pistol', 'shotgun', 'knife', 'grenade'] },
+  rare: { col: '#58c4ff', armes: ['smg', 'assault', 'silenced'] },
+  legendaire: { col: '#ffd45e', armes: ['sniper', 'glauncher', 'lmg'] }
+};
+/* Munitions offertes avec l'arme ramassée. */
+const BATTLE_MUNITIONS = {
+  knife: 0, pistol: 48, shotgun: 24, grenade: 3, smg: 120,
+  assault: 90, silenced: 40, sniper: 12, glauncher: 6, lmg: 200
+};
+/* Formats de salle : un libellé, un effectif. */
+const BATTLE_FORMATS = { '2v2': 4, '3v3': 6, '4v4': 8, '5v5': 10 };
+const POURSUITE_FORMATS = { '2v2': 4, '3v3': 6, '4v4': 8 };
+
+/* Variantes de zone d'extraction de la course poursuite. */
+const EXTRACTIONS = [
+  { id: 'fixe', nom: 'Point fixe', txt: 'Un seul cercle d’extraction, immobile.' },
+  { id: 'mobile', nom: 'Point mobile', txt: 'La zone se déplace : les deux camps voient sa trajectoire.' },
+  { id: 'multi', nom: 'Multi-points', txt: 'Trois zones : une seule suffit aux Fugitifs.' },
+  { id: 'minutee', nom: 'Extraction minutée', txt: 'La zone n’apparaît qu’au bout de quatre minutes.' },
+  { id: 'conditions', nom: 'Extraction sous conditions', txt: 'Verrouillée jusqu’à la récupération d’une caisse spéciale.' }
+];
+
+/* Titres honorifiques, valables 24 h, partagés par tout le serveur.
+   Volontairement en mémoire : ils ne valent pas une base de données, et
+   un redémarrage les efface sans conséquence.                          */
+const TITRES = new Map();            // pseudo → { titre, expire }
+function donnerTitre(pseudo, titre) {
+  if (!pseudo || !titre) return;
+  TITRES.set(pseudo, { titre, expire: Date.now() + 86400000 });
+}
+function titreDe(pseudo) {
+  const t = TITRES.get(pseudo);
+  if (!t) return '';
+  if (t.expire < Date.now()) { TITRES.delete(pseudo); return ''; }
+  return t.titre;
+}
+
+/* Deux nouveaux modes. `duree: 0` pour battle : ce ne sont pas les
+   minutes qui comptent mais les manches.                               */
+Object.assign(MODES, {
+  battle: {
+    nom: 'BATTLE — Affrontement par manches', min: 2, max: 10, duree: 0,
+    equipes: true, feuAmi: false, etoilesDepart: 0, manches: true,
+    desc: 'Carte dédiée et dense, armes aléatoires à chaque manche, équipes formées par le serveur.'
+  },
+  poursuite: {
+    nom: 'COURSE POURSUITE — Traque', min: 2, max: 8, duree: 600,
+    equipes: true, feuAmi: true, etoilesDepart: 0, camps: true,
+    desc: 'Les Fugitifs rejoignent l’extraction, les Chasseurs les éliminent. Camp choisi dans ce salon.'
+  }
+});
+
+/* Noms de camps, utilisés dans les annonces du serveur. */
+const NOMS_CAMPS = {
+  battle: { 1: 'ROUGE', 2: 'BLEUE' },
+  poursuite: { 1: 'FUGITIFS', 2: 'CHASSEURS' }
+};
+const nomCamp = (mode, e) => (NOMS_CAMPS[mode] && NOMS_CAMPS[mode][e]) || ('ÉQUIPE ' + e);
+
+/* ======================= état ajouté aux joueurs =====================
+   Rien n'est retiré : les champs sont posés à la demande, si bien qu'un
+   joueur connecté avant ce module reste parfaitement valide.
+   ===================================================================== */
+function etatModes(j) {
+  if (j.etatModes) return j;
+  j.etatModes = true;
+  j.camp = 0;                  // camp CHOISI (poursuite uniquement), 0 = indécis
+  j.elimine = false;           // sorti de la manche / de la partie
+  j.inventaire = ['knife'];    // armes réellement possédées
+  j.bouclier = 0;              // horodatage de fin d'invulnérabilité
+  j.mancheKills = 0; j.mancheMorts = 0; j.mancheDegats = 0;
+  j.mancheArmes = {};          // arme → coups tirés dans la manche
+  j.mvp = 0;                   // manches remportées comme MVP
+  j.soinT = 0;                 // minuteur du point de soin de base
+  j.coffrePris = false;        // coffre de base déjà ouvert cette manche
+  j.vuX = 0; j.vuY = 0; j.vuT = 0;   // dernière position connue des Chasseurs
+  j.verrou = 0;                // fin du verrou de traque (ms)
+  j.verrouT = 0;               // temps passé dans le rayon de traque
+  j.extracT = 0;               // temps passé dans la zone d'extraction
+  j.dernierExtrac = -1;
+  j.renfortT = 0;              // minuteur du renfort mécanique
+  return j;
+}
+
+/* =========================== SALLE : ajouts ========================== */
+
+/* Les deux nouveaux modes ont besoin d'une géométrie plus riche que les
+   trois listes d'origine. On accepte des champs supplémentaires sans
+   rien exiger : une version antérieure du client reste compatible.      */
+const _geoBase = Salle.prototype.recevoirGeometrie;
+Salle.prototype.recevoirGeometrie = function (j, m) {
+  _geoBase.call(this, j, m);
+  if (j.id !== this.hote) return;
+  const pt = p => p && isFinite(p.x) && isFinite(p.y) &&
+    p.x >= 0 && p.x <= TAILLE_MONDE && p.y >= 0 && p.y <= TAILLE_MONDE;
+  const liste = (t, n) => Array.isArray(t) ? t.filter(pt).slice(0, n).map(p => {
+    const o = { x: Math.round(p.x), y: Math.round(p.y) };
+    if (typeof p.nom === 'string') o.nom = propre(p.nom, 24);
+    if (p.r !== undefined) o.r = clamp(nombre(p.r, 120), 40, 600);
+    return o;
+  }) : [];
+
+  /* --- enceinte de l'arène du mode battle --- */
+  const a = m.arene;
+  if (a && pt(a.centre) && Array.isArray(a.bases) && a.bases.length === 2) {
+    const r = a.rect || {};
+    const rect = {
+      x: clamp(nombre(r.x, 0), 0, TAILLE_MONDE), y: clamp(nombre(r.y, 0), 0, TAILLE_MONDE),
+      w: clamp(nombre(r.w, 1500), 600, 4000), h: clamp(nombre(r.h, 1500), 600, 4000)
+    };
+    const bases = a.bases.filter(pt).map((b, i) => ({
+      equipe: i + 1, x: Math.round(b.x), y: Math.round(b.y),
+      r: clamp(nombre(b.r, 150), 80, 400),
+      coffre: pt(b.coffre) ? { x: Math.round(b.coffre.x), y: Math.round(b.coffre.y) }
+        : { x: Math.round(b.x), y: Math.round(b.y) },
+      soin: pt(b.soin) ? { x: Math.round(b.soin.x), y: Math.round(b.soin.y) }
+        : { x: Math.round(b.x), y: Math.round(b.y) }
+    }));
+    const zones = liste(a.zones, 90);
+    if (bases.length === 2 && zones.length >= 15) {
+      this.arene = { rect, bases, zones, centre: { x: Math.round(a.centre.x), y: Math.round(a.centre.y) } };
+      log('INFO', 'arene recue', { salle: this.code, zones: zones.length });
+      this.diffuserSalon();
+    }
+  }
+
+  /* --- décor de la course poursuite --- */
+  const extras = {};
+  if (Array.isArray(m.extractions)) extras.extractions = liste(m.extractions, 8);
+  if (Array.isArray(m.barrages)) extras.barrages = liste(m.barrages, 24);
+  if (Array.isArray(m.raccourcis)) extras.raccourcis = liste(m.raccourcis, 24);
+  if (Array.isArray(m.caisses)) extras.caisses = liste(m.caisses, 24);
+  if (Array.isArray(m.departs)) extras.departs = liste(m.departs, 12);
+  if (Object.keys(extras).length) {
+    this.traque = Object.assign(this.traque || {}, extras);
+  }
+};
+
+/* Le camp : unique endroit du protocole où un joueur choisit son côté,
+   et seulement dans une salle de course poursuite en attente.          */
+Salle.prototype.choisirCamp = function (j, m) {
+  if (!this.def().camps) {
+    j.envoyer({ t: 'EVENT', type: 'refus', d: { txt: 'Ce mode ne propose pas de choix de camp' } });
+    return;
+  }
+  if (this.phase !== 'attente') return;
+  etatModes(j);
+  const c = Math.round(nombre(m.camp, 0));
+  if (c !== 1 && c !== 2) return;
+  if (j.camp === c) return;
+  j.camp = c;
+  j.equipe = c;                 // visible tout de suite dans le salon
+  this.diffuserSalon();
+  this.annonce(j.pseudo + ' rejoint les ' + nomCamp('poursuite', c), c === 1 ? '#ff9f43' : '#c08aff');
+  if (!this.equilibreOk() && this.effectifs()[0] === 0) {
+    const n = this.effectifs();
+    if (Math.abs(n[1] - n[2]) > 1)
+      this.annonce('Camps déséquilibrés (' + n[1] + ' – ' + n[2] +
+        ') : il faut des volontaires pour changer de côté avant le lancement.', '#ff9f43');
+  }
+};
+
+/* Effectifs par camp, pour le compteur du salon et l'équilibre. */
+Salle.prototype.effectifs = function () {
+  const n = { 0: 0, 1: 0, 2: 0 };
+  for (const j of this.joueurs.values()) n[etatModes(j).camp || 0]++;
+  return n;
+};
+
+/* Les camps sont-ils jouables ? Deux camps non vides, écart d'un joueur
+   au maximum, et plus personne d'indécis.                              */
+Salle.prototype.equilibreOk = function () {
+  const n = this.effectifs();
+  if (n[0] > 0) return false;
+  if (!n[1] || !n[2]) return false;
+  return Math.abs(n[1] - n[2]) <= 1;
+};
+
+/* ------------------------- salon d'attente --------------------------- */
+const _salonBase = Salle.prototype.etatSalon;
+Salle.prototype.etatSalon = function () {
+  const s = _salonBase.call(this);
+  if (this.def().camps) {
+    const n = this.effectifs();
+    s.camps = { 1: n[1], 2: n[2], indecis: n[0] };
+    s.equilibre = this.equilibreOk();
+  }
+  if (this.def().manches) {
+    s.arenePrete = !!this.arene;
+    s.manchesGagnees = this.manchesGagnees || { 1: 0, 2: 0 };
+  }
+  s.titres = {};
+  for (const j of this.joueurs.values()) {
+    const t = titreDe(j.pseudo);
+    if (t) s.titres[j.id] = t;
+  }
+  return s;
+};
+
+/* Le camp choisi voyage dans la fiche du joueur. */
+const _ficheBase = Joueur.prototype.fiche;
+Joueur.prototype.fiche = function () {
+  const f = _ficheBase.call(this);
+  f.camp = this.camp || 0;
+  f.elimine = !!this.elimine;
+  f.titre = titreDe(this.pseudo);
+  return f;
+};
+
+/* --------------------------- lancement ------------------------------- */
+const _lancerBase = Salle.prototype.lancer;
+Salle.prototype.lancer = function (j) {
+  if (j.id !== this.hote || this.phase !== 'attente') return;
+  if (this.mode === 'battle' && !this.arene) {
+    j.envoyer({ t: 'EVENT', type: 'refus', d: { txt: 'L’arène n’a pas encore été tracée par l’hôte' } });
+    return;
+  }
+  if (this.mode === 'poursuite' && !this.equilibreOk()) {
+    const n = this.effectifs();
+    const txt = n[0] ? (n[0] + ' joueur(s) encore sans camp')
+      : (!n[1] || !n[2]) ? 'Il faut au moins un joueur dans chaque camp'
+        : 'Écart de plus d’un joueur entre les camps';
+    j.envoyer({ t: 'EVENT', type: 'refus', d: { txt } });
+    this.annonce('Lancement refusé : ' + txt + '. Des volontaires pour changer de côté ?', '#ff9f43');
+    return;
+  }
+  _lancerBase.call(this, j);
+};
+
+/* ------------------------ répartition des camps ---------------------- */
+const _equipesBase = Salle.prototype.repartirEquipes;
+Salle.prototype.repartirEquipes = function () {
+  const liste = [...this.joueurs.values()].map(etatModes);
+  if (this.mode === 'battle') {
+    /* Équilibrage par nombre de joueurs : personne ne choisit son camp,
+       on alterne dans un ordre tiré au hasard.                         */
+    liste.sort(() => Math.random() - 0.5);
+    liste.forEach((p, i) => { p.equipe = (i % 2) + 1; p.camp = 0; });
+    return;
+  }
+  if (this.mode === 'poursuite') {
+    /* Le camp vient du salon. Un arrivant de dernière minute sans camp
+       est versé au camp le moins fourni.                               */
+    const n = { 1: 0, 2: 0 };
+    for (const p of liste) if (p.camp) n[p.camp]++;
+    for (const p of liste) {
+      if (!p.camp) { p.camp = n[1] <= n[2] ? 1 : 2; n[p.camp]++; }
+      p.equipe = p.camp;
+    }
+    return;
+  }
+  _equipesBase.call(this);
+};
+
+/* ---------------------------- démarrage ------------------------------ */
+const _demarrerBase = Salle.prototype.demarrer;
+Salle.prototype.demarrer = function () {
+  const O = this.options;
+  if (this.mode === 'battle') {
+    this.manche = 0;
+    this.manchesGagnees = { 1: 0, 2: 0 };
+    this.manchePhase = 'attente';
+    this.mancheT = 0;
+    this.armesSol = [];
+    this.armesPrec = '';
+    this.dernierResultat = null;
+  }
+  if (this.mode === 'poursuite') {
+    this.avanceReste = clamp(nombre(O.avance, 30), 10, 90);
+    this.dernierAvance = -1;
+    this.majTraqueReste = 0;
+    this.barrageReste = 180; this.barrageAnnonce = false;
+    this.barrages = []; this.barragePrevu = null;
+    this.raccourciReste = 120; this.raccourcisVus = [];
+    this.caisseAttrapee = false;
+    /* Le départ des Fugitifs est tiré AVANT la zone d'extraction : la
+       zone doit tomber dans un autre biome, pour forcer la traversée. */
+    const T = this.traque || {};
+    const D = (T.departs && T.departs.length ? T.departs : this.geo.spawns) || [];
+    this.departFugitifs = D.length ? pioche(D) : null;
+    this.preparerExtraction();
+  }
+  _demarrerBase.call(this);
+  if (this.mode === 'poursuite') this.tempsRestant = clamp(nombre(O.dureeMax, 600), 240, 1800);
+  for (const j of this.joueurs.values()) {
+    etatModes(j);
+    j.elimine = false; j.inventaire = ['knife']; j.arme = 'knife';
+    j.mancheKills = 0; j.mancheMorts = 0; j.mancheDegats = 0; j.mancheArmes = {};
+    j.mvp = 0; j.verrou = 0; j.verrouT = 0; j.extracT = 0; j.dernierExtrac = -1;
+    j.soinT = 0; j.coffrePris = false; j.renfortT = 0;
+    j.vuX = Math.round(j.x); j.vuY = Math.round(j.y); j.vuT = 0;
+  }
+  // l'état de mode part après WORLD_INIT : le client a déjà sa carte
+  for (const j of this.joueurs.values()) this.envoyerModeInit(j);
+  if (this.mode === 'battle') this.nouvelleManche();
+  if (this.mode === 'poursuite') {
+    this.annonce('Départ des Fugitifs révélé — les Chasseurs sont bloqués ' +
+      Math.round(this.avanceReste) + ' secondes', '#ff9f43');
+  }
+};
+
+/* Choix de la variante d'extraction et pose des zones. */
+Salle.prototype.preparerExtraction = function () {
+  const T = this.traque || {};
+  const voulu = this.options.variante;
+  const choix = typeof voulu === 'string' && EXTRACTIONS.some(e => e.id === voulu)
+    ? voulu : pioche(EXTRACTIONS).id;
+  let dispo = ((T.extractions && T.extractions.length ? T.extractions : this.geo.spawns) || []).slice();
+  dispo.sort(() => Math.random() - 0.5);
+  /* La zone doit tomber dans un biome différent du point de départ, et
+     de toute façon loin de lui : on écarte les candidats du même biome
+     puis on classe du plus éloigné au plus proche.                    */
+  const dep = this.departFugitifs;
+  if (dep) {
+    const autres = dispo.filter(p => (p.nom && dep.nom)
+      ? p.nom !== dep.nom
+      : Math.hypot(p.x - dep.x, p.y - dep.y) > 2500);
+    if (autres.length) dispo = autres;
+    dispo.sort((a, b) =>
+      Math.hypot(b.x - dep.x, b.y - dep.y) - Math.hypot(a.x - dep.x, a.y - dep.y));
+  }
+  const zone = p => ({ x: p.x, y: p.y, r: clamp(nombre(p.r, 200), 120, 400) });
+  const E = { variante: choix, zones: [], ouverte: true, caisse: null, retard: 0 };
+  E.zones = (choix === 'multi' ? dispo.slice(0, 3) : dispo.slice(0, 1)).map(zone);
+  if (!E.zones.length && this.geo.extraction) E.zones = [zone(this.geo.extraction)];
+  if (choix === 'mobile') {
+    // trajectoire : une boucle entre quelques points sûrs, parcourue lentement
+    E.trajet = dispo.slice(0, 5).map(p => ({ x: p.x, y: p.y }));
+    if (E.trajet.length < 2) E.trajet = null;
+    E.etape = 0; E.avance = 0;
+  }
+  if (choix === 'minutee') { E.ouverte = false; E.retard = 240; }
+  if (choix === 'conditions') {
+    E.ouverte = false;
+    const pool = ((T.caisses && T.caisses.length ? T.caisses : dispo) || []).slice();
+    pool.sort(() => Math.random() - 0.5);
+    const C = pool[0];
+    E.caisse = C ? { x: C.x, y: C.y, r: 90 } : null;
+    if (!E.caisse) { E.ouverte = true; E.variante = 'fixe'; }
+  }
+  this.extraction = E;
+};
+
+/* État de mode envoyé juste après WORLD_INIT : tout ce que WORLD_INIT
+   ne transporte pas (arène, camps, extraction, options de manche).     */
+Salle.prototype.envoyerModeInit = function (j) {
+  if (this.mode !== 'battle' && this.mode !== 'poursuite') return;
+  etatModes(j);
+  const msg = {
+    t: 'MODE_INIT', mode: this.mode, equipe: j.equipe,
+    camp: j.camp, nomCamp: nomCamp(this.mode, j.equipe), options: this.options
+  };
+  if (this.mode === 'battle') {
+    msg.arene = this.arene;
+    msg.manches = clamp(Math.round(nombre(this.options.manches, 3)), 1, 9);
+    msg.dureeManche = clamp(Math.round(nombre(this.options.dureeManche, 120)), 60, 300);
+  }
+  if (this.mode === 'poursuite') {
+    const E = this.extraction || {};
+    const def = EXTRACTIONS.find(e => e.id === E.variante) || EXTRACTIONS[0];
+    msg.extraction = {
+      variante: E.variante, nom: def.nom, txt: def.txt,
+      zones: E.ouverte ? E.zones : [], caisse: E.caisse,
+      ouverte: !!E.ouverte, retard: Math.round(E.retard || 0)
+    };
+    msg.avance = Math.round(this.avanceReste || 0);
+    msg.majMinimap = clamp(nombre(this.options.majMinimap, 15), 5, 60);
+    msg.depart = this.departFugitifs
+      ? { x: Math.round(this.departFugitifs.x), y: Math.round(this.departFugitifs.y) }
+      : { x: Math.round(j.x), y: Math.round(j.y) };
+    msg.veh = this.vehiculesCamp(j.equipe);
+    msg.duree = Math.round(this.tempsRestant);
+  }
+  j.envoyer(msg);
+};
+
+/* Véhicules de départ proposés à un camp. Le client les fait apparaître
+   chez lui : il est seul à connaître la chaussée.                      */
+Salle.prototype.vehiculesCamp = function (equipe) {
+  return equipe === 1
+    ? ['sport', 'moto', 'berline']          // Fugitifs : rapides et agiles
+    : ['suv', 'muscle', 'pickup'];          // Chasseurs : robustes
+};
+
+/* ------------------------ placement des joueurs ---------------------- */
+const _placerBase = Salle.prototype.placer;
+Salle.prototype.placer = function (j) {
+  etatModes(j);
+  if (this.mode === 'battle' && this.arene) {
+    const b = this.arene.bases[(j.equipe || 1) - 1] || this.arene.bases[0];
+    const n = [...this.joueurs.keys()].indexOf(j.id);
+    j.x = clamp(b.x + Math.cos(n * 1.7) * 40, 40, TAILLE_MONDE - 40);
+    j.y = clamp(b.y + Math.sin(n * 1.7) * 40, 40, TAILLE_MONDE - 40);
+    j.veh = null; j.nage = false; j.dedans = false;
+    j.tDernierInput = Date.now();
+    j.histo.length = 0;
+    j.grace = Date.now() + 2000;
+    j.bouclier = Date.now() + 3000;          // bouclier de sortie de base
+    return;
+  }
+  if (this.mode === 'poursuite') {
+    const T = this.traque || {};
+    const D = (T.departs && T.departs.length ? T.departs : this.geo.spawns) || [];
+    if (D.length) {
+      if (!this.departFugitifs) this.departFugitifs = D[0];
+      // les Chasseurs partent du point le plus éloigné du départ des Fugitifs
+      let loin = D[0], pire = -1;
+      for (const p of D) {
+        const d = (p.x - this.departFugitifs.x) * (p.x - this.departFugitifs.x) +
+          (p.y - this.departFugitifs.y) * (p.y - this.departFugitifs.y);
+        if (d > pire) { pire = d; loin = p; }
+      }
+      const base = j.equipe === 2 ? loin : this.departFugitifs;
+      const n = [...this.joueurs.keys()].indexOf(j.id);
+      j.x = clamp(base.x + Math.cos(n * 2.1) * 55, 40, TAILLE_MONDE - 40);
+      j.y = clamp(base.y + Math.sin(n * 2.1) * 55, 40, TAILLE_MONDE - 40);
+      j.veh = null; j.nage = false; j.dedans = false;
+      j.tDernierInput = Date.now();
+      j.histo.length = 0;
+      j.grace = Date.now() + 2000;
+      return;
+    }
+  }
+  _placerBase.call(this, j);
+};
+
+/* ====================== MODE BATTLE : LES MANCHES ==================== */
+
+/* Tire les emplacements d'armes d'une manche. Jamais deux manches de
+   suite avec exactement la même disposition.                           */
+Salle.prototype.tirerArmes = function () {
+  const A = this.arene;
+  if (!A) return [];
+  const legendairesOk = this.options.legendaires !== false;
+  let sortie = [];
+  for (let essai = 0; essai < 6; essai++) {
+    const zones = A.zones.slice();
+    for (let i = zones.length - 1; i > 0; i--) {
+      const k = Math.floor(Math.random() * (i + 1));
+      const tmp = zones[i]; zones[i] = zones[k]; zones[k] = tmp;
+    }
+    const n = Math.min(zones.length, Math.round(alea(15, 25)));
+    const liste = [];
+    let legendaire = false;
+    for (let i = 0; i < n; i++) {
+      const d = Math.random() * 100;
+      let rarete = d < 60 ? 'commune' : d < 90 ? 'rare' : 'legendaire';
+      // une seule arme légendaire par manche, et aucune si l'option est coupée
+      if (rarete === 'legendaire' && (legendaire || !legendairesOk)) rarete = 'rare';
+      if (rarete === 'legendaire') legendaire = true;
+      liste.push({
+        id: 'a' + this.manche + '_' + i,
+        arme: pioche(BATTLE_RARETES[rarete].armes),
+        rarete, x: zones[i].x, y: zones[i].y, lache: false, expire: 0
+      });
+    }
+    /* L'arme légendaire va au centre de la carte, dans une zone exposée :
+       il faut se découvrir pour la prendre.                            */
+    if (legendairesOk && liste.length) {
+      let L = liste.find(a => a.rarete === 'legendaire');
+      if (!L) {
+        L = liste[0];
+        L.rarete = 'legendaire';
+        L.arme = pioche(BATTLE_RARETES.legendaire.armes);
+      }
+      L.x = A.centre.x; L.y = A.centre.y;
+    }
+    const signature = liste.map(a => a.x + ':' + a.y).sort().join('|');
+    sortie = liste;
+    if (signature !== this.armesPrec) { this.armesPrec = signature; break; }
+  }
+  return sortie;
+};
+
+/* Ouverture d'une manche : gel de 5 s dans les bases, armes révélées. */
+Salle.prototype.nouvelleManche = function () {
+  this.manche = (this.manche || 0) + 1;
+  this.manchePhase = 'gel';
+  this.mancheT = 5;
+  this.armesSol = this.tirerArmes();
+  for (const j of this.joueurs.values()) {
+    etatModes(j);
+    j.elimine = false; j.mort = false; j.respawnT = 0;
+    j.inventaire = ['knife']; j.arme = 'knife';
+    j.hp = Math.round(j.maxHp * 0.5);          // chaque manche repart à 50 % de vie
+    j.armor = 0;
+    j.mancheKills = 0; j.mancheMorts = 0; j.mancheDegats = 0; j.mancheArmes = {};
+    j.coffrePris = false; j.soinT = 0;
+    this.placer(j);
+    j.envoyer({ t: 'EVENT', type: 'respawn', d: { x: j.x, y: j.y, hp: j.hp } });
+  }
+  this.diffuser({
+    t: 'EVENT', type: 'manche-debut',
+    d: {
+      manche: this.manche,
+      pourGagner: clamp(Math.round(nombre(this.options.manches, 3)), 1, 9),
+      gagnees: this.manchesGagnees,
+      duree: clamp(Math.round(nombre(this.options.dureeManche, 120)), 60, 300),
+      gel: 5,
+      armes: this.armesSol.map(a => ({ id: a.id, arme: a.arme, rarete: a.rarete, x: a.x, y: a.y }))
+    }
+  });
+  this.annonce('Manche ' + this.manche + ' — ' + this.armesSol.length + ' armes au sol', '#ffd45e');
+  log('INFO', 'manche', { salle: this.code, n: this.manche, armes: this.armesSol.length });
+};
+
+/* Fin de manche : survivants, MVP, écran de résultats de 10 secondes. */
+Salle.prototype.finManche = function (raison) {
+  const vivants = { 1: 0, 2: 0 };
+  for (const j of this.joueurs.values()) if (!j.elimine && !j.mort) vivants[j.equipe]++;
+  const gagnant = vivants[1] > vivants[2] ? 1 : vivants[2] > vivants[1] ? 2 : 0;
+  if (gagnant) {
+    this.manchesGagnees[gagnant]++;
+    for (const j of this.joueurs.values()) if (j.equipe === gagnant) j.score += 500;
+  }
+  // MVP : le plus d'éliminations, les dégâts tranchent en cas d'égalité
+  let mvp = null;
+  for (const j of this.joueurs.values()) {
+    if (!mvp) { mvp = j; continue; }
+    if (j.mancheKills * 1000 + j.mancheDegats > mvp.mancheKills * 1000 + mvp.mancheDegats) mvp = j;
+  }
+  if (mvp && !(mvp.mancheKills || mvp.mancheDegats)) mvp = null;
+  if (mvp) mvp.mvp++;
+  const armeTop = j => {
+    let nom = '', n = -1;
+    for (const k in j.mancheArmes) if (j.mancheArmes[k] > n) { n = j.mancheArmes[k]; nom = k; }
+    return nom;
+  };
+  this.dernierResultat = {
+    manche: this.manche, gagnant, raison, vivants,
+    gagnees: this.manchesGagnees,
+    pourGagner: clamp(Math.round(nombre(this.options.manches, 3)), 1, 9),
+    mvp: mvp ? mvp.id : null,
+    attente: 10,
+    lignes: [...this.joueurs.values()].map(j => ({
+      id: j.id, pseudo: j.pseudo, couleur: j.couleur, equipe: j.equipe,
+      kills: j.mancheKills, morts: j.mancheMorts, score: j.score,
+      arme: armeTop(j), mvp: !!(mvp && mvp.id === j.id)
+    }))
+  };
+  this.manchePhase = 'resultats';
+  this.mancheT = 10;
+  this.armesSol = [];
+  this.diffuser({ t: 'EVENT', type: 'manche-fin', d: this.dernierResultat });
+  this.annonce(gagnant
+    ? 'Manche ' + this.manche + ' remportée par l’équipe ' + nomCamp('battle', gagnant) +
+    ' (' + this.manchesGagnees[1] + ' – ' + this.manchesGagnees[2] + ')'
+    : 'Manche ' + this.manche + ' nulle : autant de survivants de chaque côté',
+    gagnant === 1 ? '#ff6b6b' : gagnant === 2 ? '#58c4ff' : '#9ec5ff');
+};
+
+/* Horloge des manches : gel, jeu, résultats. */
+Salle.prototype.reglesBattle = function (dt) {
+  if (!this.arene) return;
+  this.mancheT -= dt;
+  if (this.manchePhase === 'gel') {
+    if (this.mancheT <= 0) {
+      this.manchePhase = 'jeu';
+      this.mancheT = clamp(Math.round(nombre(this.options.dureeManche, 120)), 60, 300);
+      for (const j of this.joueurs.values()) j.bouclier = Date.now() + 3000;
+      this.diffuser({ t: 'EVENT', type: 'manche-feu', d: { duree: Math.round(this.mancheT) } });
+    }
+    return;
+  }
+  if (this.manchePhase === 'resultats') {
+    if (this.mancheT > 0) return;
+    const pourGagner = clamp(Math.round(nombre(this.options.manches, 3)), 1, 9);
+    if (this.manchesGagnees[1] >= pourGagner || this.manchesGagnees[2] >= pourGagner) {
+      this.terminer(this.manchesGagnees[1] > this.manchesGagnees[2] ? 'equipe1' : 'equipe2');
+      return;
+    }
+    this.nouvelleManche();
+    return;
+  }
+  if (this.manchePhase !== 'jeu') return;
+
+  /* --- manche en cours --- */
+  // armes lâchées : vingt secondes au sol puis disparition
+  const t = Date.now();
+  for (let i = this.armesSol.length - 1; i >= 0; i--) {
+    const a = this.armesSol[i];
+    if (a.expire && t > a.expire) {
+      this.armesSol.splice(i, 1);
+      this.diffuser({ t: 'EVENT', type: 'arme-partie', d: { id: a.id } });
+    }
+  }
+  // points de soin des bases : 20 % de vie toutes les 3 secondes
+  for (const j of this.joueurs.values()) {
+    if (j.mort || j.elimine) continue;
+    const b = this.arene.bases[(j.equipe || 1) - 1];
+    if (!b) continue;
+    if ((b.soin.x - j.x) * (b.soin.x - j.x) + (b.soin.y - j.y) * (b.soin.y - j.y) < 90 * 90) {
+      j.soinT += dt;
+      if (j.soinT >= 3) {
+        j.soinT = 0;
+        j.hp = Math.min(j.maxHp, j.hp + j.maxHp * 0.2);
+        j.envoyer({ t: 'EVENT', type: 'soin', d: { hp: Math.round(j.hp) } });
+      }
+    } else j.soinT = 0;
+  }
+  // fin par élimination totale d'un camp
+  const vivants = { 1: 0, 2: 0 };
+  for (const j of this.joueurs.values()) if (!j.elimine && !j.mort) vivants[j.equipe]++;
+  if (!vivants[1] || !vivants[2]) { this.finManche('elimination'); return; }
+  if (this.mancheT <= 0) this.finManche('temps');
+};
+
+/* Ramassage d'une arme au sol, ou ouverture du coffre de base. */
+Salle.prototype.ramasserArme = function (j, m) {
+  if (this.mode !== 'battle' || this.manchePhase !== 'jeu' || j.mort || j.elimine) return;
+  etatModes(j);
+  const id = propre(String(m.cible === undefined ? '' : m.cible), 40);
+  if (id === 'coffre') {
+    const b = this.arene && this.arene.bases[(j.equipe || 1) - 1];
+    if (!b || j.coffrePris) return;
+    if ((b.coffre.x - j.x) * (b.coffre.x - j.x) + (b.coffre.y - j.y) * (b.coffre.y - j.y) > 110 * 110) return;
+    j.coffrePris = true;
+    const arme = pioche(BATTLE_RARETES.commune.armes);
+    if (!j.inventaire.includes(arme)) j.inventaire.push(arme);
+    j.arme = arme;
+    j.envoyer({
+      t: 'EVENT', type: 'arme-prise',
+      d: { arme, rarete: 'commune', mun: BATTLE_MUNITIONS[arme] || 0, coffre: 1 }
+    });
+    return;
+  }
+  const i = this.armesSol.findIndex(a => a.id === id);
+  if (i < 0) return;
+  const a = this.armesSol[i];
+  if ((a.x - j.x) * (a.x - j.x) + (a.y - j.y) * (a.y - j.y) > 70 * 70) {
+    log('WARN', 'ramassage hors portee', { salle: this.code, id: j.id, arme: a.arme });
+    return;
+  }
+  this.armesSol.splice(i, 1);
+  if (!j.inventaire.includes(a.arme)) j.inventaire.push(a.arme);
+  j.arme = a.arme;
+  j.envoyer({
+    t: 'EVENT', type: 'arme-prise',
+    d: { arme: a.arme, rarete: a.rarete, mun: BATTLE_MUNITIONS[a.arme] || 0 }
+  });
+  this.diffuser({ t: 'EVENT', type: 'arme-partie', d: { id: a.id } }, j.id);
+};
+
+/* ==================== MODE COURSE POURSUITE : TRAQUE ================= */
+Salle.prototype.reglesPoursuite = function (dt) {
+  const tous = [...this.joueurs.values()].map(etatModes);
+  const fugitifs = tous.filter(j => j.equipe === 1);
+  const chasseurs = tous.filter(j => j.equipe === 2);
+  const t = Date.now();
+
+  /* --- avance des Fugitifs : les Chasseurs sont bloqués --- */
+  if (this.avanceReste > 0) {
+    this.avanceReste -= dt;
+    const n = Math.ceil(this.avanceReste);
+    if (n !== this.dernierAvance) {
+      this.dernierAvance = n;
+      this.diffuser({ t: 'EVENT', type: 'avance', d: { n: Math.max(0, n) } });
+    }
+    if (this.avanceReste <= 0) {
+      this.annonce('Les Chasseurs sont lâchés !', '#c08aff');
+      this.diffuser({ t: 'EVENT', type: 'avance', d: { n: 0, fin: 1 } });
+    }
+  }
+
+  /* --- zone d'extraction : ouverture, déplacement, caisse --- */
+  const E = this.extraction;
+  if (E) {
+    if (!E.ouverte && E.variante === 'minutee') {
+      E.retard -= dt;
+      if (E.retard <= 0) {
+        E.ouverte = true;
+        this.diffuser({ t: 'EVENT', type: 'extraction-ouverte', d: { zones: E.zones, variante: E.variante } });
+        this.annonce('La zone d’extraction vient d’apparaître', '#7ae582');
+      }
+    }
+    if (!E.ouverte && E.variante === 'conditions' && E.caisse && !this.caisseAttrapee) {
+      for (const p of tous) {
+        if (p.mort || p.elimine) continue;
+        if ((E.caisse.x - p.x) * (E.caisse.x - p.x) + (E.caisse.y - p.y) * (E.caisse.y - p.y) < E.caisse.r * E.caisse.r) {
+          this.caisseAttrapee = true;
+          E.ouverte = true;
+          this.diffuser({
+            t: 'EVENT', type: 'extraction-ouverte',
+            d: { zones: E.zones, variante: E.variante, par: p.pseudo }
+          });
+          this.annonce(p.pseudo + ' a récupéré la caisse : l’extraction est déverrouillée', '#7ae582');
+          break;
+        }
+      }
+    }
+    if (E.variante === 'mobile' && E.trajet && E.zones.length) {
+      // 40 px/s : assez lent pour être intercepté, assez vif pour compter
+      E.avance += dt * 40;
+      const a = E.trajet[E.etape % E.trajet.length];
+      const b = E.trajet[(E.etape + 1) % E.trajet.length];
+      const long = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+      if (E.avance >= long) { E.avance = 0; E.etape++; }
+      else {
+        const k = E.avance / long;
+        E.zones[0].x = Math.round(a.x + (b.x - a.x) * k);
+        E.zones[0].y = Math.round(a.y + (b.y - a.y) * k);
+      }
+    }
+  }
+
+  /* --- traque : mise à jour périodique de la position des Fugitifs --- */
+  const periode = clamp(nombre(this.options.majMinimap, 15), 5, 60);
+  this.majTraqueReste -= dt;
+  if (this.majTraqueReste <= 0) {
+    this.majTraqueReste = periode;
+    for (const f of fugitifs) {
+      if (f.mort || f.elimine) continue;
+      // brouillage : traverser l'eau gèle la dernière position connue
+      if (f.nage) continue;
+      f.vuX = Math.round(f.x); f.vuY = Math.round(f.y); f.vuT = t;
+    }
+  }
+
+  /* --- bonus de traque : 3 s dans un rayon de 200 px → verrou de 10 s --- */
+  for (const f of fugitifs) {
+    if (f.mort || f.elimine) { f.verrouT = 0; continue; }
+    const colle = chasseurs.some(c => !c.mort && !c.elimine &&
+      (c.x - f.x) * (c.x - f.x) + (c.y - f.y) * (c.y - f.y) < 200 * 200);
+    f.verrouT = colle ? f.verrouT + dt : Math.max(0, f.verrouT - dt * 0.8);
+    if (f.verrouT >= 3 && t > f.verrou) {
+      f.verrouT = 0;
+      f.verrou = t + 10000;
+      f.envoyer({ t: 'EVENT', type: 'verrou', d: { duree: 10 } });
+      for (const c of chasseurs)
+        c.envoyer({ t: 'EVENT', type: 'verrou-pose', d: { id: f.id, pseudo: f.pseudo, duree: 10 } });
+    }
+  }
+
+  /* --- barrage de faction : toutes les 3 minutes, annoncé 30 s avant --- */
+  const T = this.traque || {};
+  this.barrageReste -= dt;
+  if (!this.barrageAnnonce && this.barrageReste <= 30) {
+    this.barrageAnnonce = true;
+    const pool = (T.barrages && T.barrages.length ? T.barrages : this.geo.spawns) || [];
+    this.barragePrevu = pool.length ? pioche(pool) : null;
+    if (this.barragePrevu) {
+      this.diffuser({
+        t: 'EVENT', type: 'barrage-annonce',
+        d: { x: this.barragePrevu.x, y: this.barragePrevu.y, dans: 30 }
+      });
+      this.annonce('Barrage de faction annoncé dans 30 secondes', '#ffa33d');
+    }
+  }
+  if (this.barrageReste <= 0) {
+    this.barrageReste = 180; this.barrageAnnonce = false;
+    if (this.barragePrevu) {
+      const b = { x: this.barragePrevu.x, y: this.barragePrevu.y };
+      this.barrages.push(b);
+      while (this.barrages.length > 4) this.barrages.shift();
+      this.diffuser({ t: 'EVENT', type: 'barrage', d: { x: b.x, y: b.y } });
+      this.annonce('Barrage en place — contournez-le ou forcez-le', '#ffa33d');
+      this.barragePrevu = null;
+    }
+  }
+
+  /* --- raccourci révélé aux seuls Fugitifs, toutes les 2 minutes --- */
+  this.raccourciReste -= dt;
+  if (this.raccourciReste <= 0) {
+    this.raccourciReste = 120;
+    const pool = (T.raccourcis || []).filter(r => !this.raccourcisVus.some(v => v.x === r.x && v.y === r.y));
+    if (pool.length) {
+      const r = pioche(pool);
+      this.raccourcisVus.push(r);
+      for (const f of fugitifs) f.envoyer({
+        t: 'EVENT', type: 'raccourci', d: { x: r.x, y: r.y, nom: r.nom || 'Raccourci' }
+      });
+    }
+  }
+
+  /* --- renfort mécanique : un Fugitif à pied reçoit une moto --- */
+  for (const f of fugitifs) {
+    if (f.mort || f.elimine || f.veh) { f.renfortT = Math.min(0, f.renfortT); continue; }
+    f.renfortT += dt;
+    if (f.renfortT >= 20) {
+      f.renfortT = -60;              // un renfort par minute au maximum
+      const a = Math.random() * Math.PI * 2, d = alea(120, 300);
+      f.envoyer({
+        t: 'EVENT', type: 'renfort',
+        d: { x: Math.round(f.x + Math.cos(a) * d), y: Math.round(f.y + Math.sin(a) * d) }
+      });
+    }
+  }
+
+  /* --- extraction : rester 5 secondes dans une zone ouverte --- */
+  if (E && E.ouverte && E.zones.length) {
+    for (const f of fugitifs) {
+      if (f.mort || f.elimine || f.extrait) continue;
+      const dedans = E.zones.some(z =>
+        (z.x - f.x) * (z.x - f.x) + (z.y - f.y) * (z.y - f.y) < z.r * z.r);
+      if (dedans) {
+        f.extracT += dt;
+        const reste = Math.max(0, 5 - f.extracT);
+        if (Math.ceil(reste) !== f.dernierExtrac) {
+          f.dernierExtrac = Math.ceil(reste);
+          f.envoyer({ t: 'EVENT', type: 'extraction-cours', d: { reste: Math.ceil(reste) } });
+        }
+        if (f.extracT >= 5) {
+          f.extrait = true; f.score += 1000;
+          this.diffuser({ t: 'EVENT', type: 'extraction', d: { id: f.id, pseudo: f.pseudo } });
+          this.annonce(f.pseudo + ' a activé l’extraction — les Fugitifs gagnent !', '#7ae582');
+          this.terminer('fugitifs');
+          return;
+        }
+      } else if (f.extracT > 0) {
+        f.extracT = 0; f.dernierExtrac = -1;
+        f.envoyer({ t: 'EVENT', type: 'extraction-cours', d: { reste: 0, annule: 1 } });
+      }
+    }
+  }
+
+  /* --- victoire des Chasseurs : plus un seul Fugitif debout --- */
+  const restants = fugitifs.filter(f => !f.elimine && !f.extrait);
+  if (fugitifs.length && !restants.length) this.terminer('chasseurs');
+};
+
+/* Branchement sur l'aiguillage des règles par mode. */
+const _reglesBase = Salle.prototype.reglesMode;
+Salle.prototype.reglesMode = function (dt) {
+  if (this.mode === 'battle') { this.reglesBattle(dt); return; }
+  if (this.mode === 'poursuite') { this.reglesPoursuite(dt); return; }
+  _reglesBase.call(this, dt);
+};
+
+/* ====================== ENTRÉES ET VALIDATIONS ======================= */
+
+/* Gel des déplacements : dans sa base pendant le décompte de manche, au
+   départ pour un Chasseur pendant l'avance des Fugitifs.               */
+Salle.prototype.figeOu = function (j) {
+  if (this.mode === 'battle' && this.manchePhase === 'gel') return 'décompte de manche';
+  if (this.mode === 'poursuite' && j.equipe === 2 && this.avanceReste > 0) return 'avance des Fugitifs';
+  return '';
+};
+const _inputBase = Salle.prototype.input;
+Salle.prototype.input = function (j, m) {
+  etatModes(j);
+  const fige = this.phase === 'jeu' ? this.figeOu(j) : '';
+  if (fige) {
+    // on accepte la visée, jamais le déplacement
+    const x = nombre(m.x, j.x), y = nombre(m.y, j.y);
+    j.ang = nombre(m.a, j.ang); j.aim = nombre(m.m, j.aim);
+    j.seq = Math.max(j.seq, nombre(m.seq, 0));
+    j.tDernierInput = Date.now();
+    if (Math.hypot(x - j.x, y - j.y) > 70) this.corriger(j, fige);
+    return;
+  }
+  _inputBase.call(this, j, m);
+  // enceinte de l'arène : personne ne sort du terrain
+  if (this.mode === 'battle' && this.arene && this.phase === 'jeu') {
+    const R = this.arene.rect, mg = 30;
+    const cx = clamp(j.x, R.x + mg, R.x + R.w - mg);
+    const cy = clamp(j.y, R.y + mg, R.y + R.h - mg);
+    if (cx !== j.x || cy !== j.y) { j.x = cx; j.y = cy; this.corriger(j, 'limite de l’arène'); }
+  }
+};
+
+/* Comptage des coups tirés : sert à désigner « l'arme la plus utilisée »
+   de la manche sur l'écran de résultats.                               */
+const _tirBase = Salle.prototype.tir;
+Salle.prototype.tir = function (j, m) {
+  const avant = j.tirT;
+  _tirBase.call(this, j, m);
+  if (j.tirT !== avant) {
+    etatModes(j);
+    j.mancheArmes[j.arme] = (j.mancheArmes[j.arme] || 0) + 1;
+  }
+};
+
+/* Dégâts : bouclier de sortie de base, et comptage des dégâts de la
+   manche pour le MVP.                                                  */
+const _blesserBase = Salle.prototype.blesser;
+Salle.prototype.blesser = function (cible, degats, par, cause) {
+  etatModes(cible);
+  if (cible.bouclier && Date.now() < cible.bouclier) {
+    if (par) par.envoyer({ t: 'EVENT', type: 'refus', d: { txt: 'Cible protégée à la sortie de sa base' } });
+    return;
+  }
+  if (par) { etatModes(par); par.mancheDegats += degats; }
+  _blesserBase.call(this, cible, degats, par, cause);
+};
+const _toucheBase = Salle.prototype.touche;
+Salle.prototype.touche = function (j, m) {
+  /* Les explosifs touchent plusieurs cibles d'un coup : le plafond de
+     débit d'origine les rejetterait à tort. On leur rend du crédit. */
+  if (m && (m.arme === 'grenade' || m.arme === 'glauncher')) j.dmgCumul = Math.max(0, j.dmgCumul - 80);
+  _toucheBase.call(this, j, m);
+};
+
+/* Mort : en battle on est éliminé pour la manche et on lâche ses armes ;
+   en course poursuite un Fugitif mort est hors course.                 */
+const _tuerBase = Salle.prototype.tuer;
+Salle.prototype.tuer = function (victime, tueur, cause) {
+  if (victime.mort) return;
+  etatModes(victime);
+  if (tueur) etatModes(tueur);
+  const avantKills = tueur ? tueur.kills : 0;
+  _tuerBase.call(this, victime, tueur, cause);
+  if (this.mode !== 'battle' && this.mode !== 'poursuite') return;
+
+  victime.mancheMorts++;
+  if (tueur && tueur.kills > avantKills) {
+    tueur.mancheKills++;
+    /* Barème demandé : 100 pour l'élimination, 50 de bonus à l'arme
+       légendaire, 25 de bonus en mouvement. Le serveur a déjà crédité
+       son barème générique : on applique la différence.                */
+    let pts = 100 - (this.mode === 'battle' ? 500 : 250);
+    if (BATTLE_RARETES.legendaire.armes.indexOf(tueur.arme) >= 0) pts += 50;
+    if (this.enMouvement(tueur)) pts += 25;
+    tueur.score = Math.max(0, tueur.score + pts);
+  }
+
+  if (this.mode === 'battle') {
+    victime.elimine = true;
+    victime.respawnT = 1e9;                 // pas de retour avant la manche suivante
+    // toutes ses armes tombent au sol, ramassables 20 secondes
+    const t = Date.now();
+    const lachees = [];
+    let n = 0;
+    for (const arme of victime.inventaire) {
+      if (arme === 'knife') continue;
+      const a = {
+        id: 'd' + victime.id + '_' + (this.manche || 0) + '_' + (n++),
+        arme, rarete: this.rareteDe(arme),
+        x: Math.round(victime.x + alea(-18, 18)), y: Math.round(victime.y + alea(-18, 18)),
+        lache: true, expire: t + 20000
+      };
+      this.armesSol.push(a);
+      lachees.push({ id: a.id, arme: a.arme, rarete: a.rarete, x: a.x, y: a.y });
+    }
+    victime.inventaire = ['knife'];
+    if (lachees.length) this.diffuser({ t: 'EVENT', type: 'armes-lachees', d: { armes: lachees } });
+    if (this.manchePhase === 'jeu') this.reglesBattle(0);
+    return;
+  }
+  if (this.mode === 'poursuite' && victime.equipe === 1) {
+    victime.elimine = true;
+    victime.respawnT = 1e9;
+    this.annonce(victime.pseudo + ' (Fugitif) est hors course', '#ff9f43');
+    this.reglesPoursuite(0);
+  }
+};
+Salle.prototype.rareteDe = function (arme) {
+  for (const k in BATTLE_RARETES) if (BATTLE_RARETES[k].armes.indexOf(arme) >= 0) return k;
+  return 'commune';
+};
+/* Le tireur bougeait-il ? On le lit sur l'historique de positions. */
+Salle.prototype.enMouvement = function (j) {
+  if (!j.histo || j.histo.length < 2) return false;
+  const a = j.histo[0], b = j.histo[j.histo.length - 1];
+  const dt = (b.t - a.t) / 1000;
+  if (dt < 0.1) return false;
+  return Math.hypot(b.x - a.x, b.y - a.y) / dt > 60;
+};
+
+/* Interactions : ramassage d'armes, et refus des véhicules en battle. */
+const _interBase = Salle.prototype.interagir;
+Salle.prototype.interagir = function (j, m) {
+  const type = propre(m.type, 20);
+  if (type === 'arme') { this.ramasserArme(j, m); return; }
+  if (this.mode === 'battle' && (type === 'monter' || type === 'descendre')) {
+    if (type === 'monter') j.envoyer({ t: 'EVENT', type: 'refus', d: { txt: 'Aucun véhicule dans l’arène' } });
+    return;
+  }
+  // aucune police dans ces deux modes : le compteur d'étoiles est muet
+  if ((this.mode === 'battle' || this.mode === 'poursuite') && type === 'etoiles') return;
+  _interBase.call(this, j, m);
+};
+
+/* ====================== DIFFUSION DE L'ÉTAT DE MODE ==================
+   Un message à part, à 5 Hz : il évite d'alourdir chaque TICK, et son
+   contenu diffère d'un joueur à l'autre (un Fugitif ne voit pas ce que
+   voit un Chasseur).
+   ===================================================================== */
+const _tickBase = Salle.prototype.diffuserTick;
+Salle.prototype.diffuserTick = function () {
+  _tickBase.call(this);
+  if (this.mode !== 'battle' && this.mode !== 'poursuite') return;
+  if (this.tick % 4 !== 0) return;
+  if (this.mode === 'battle') this.diffuserBattle();
+  else this.diffuserPoursuite();
+};
+Salle.prototype.diffuserBattle = function () {
+  const t = Date.now();
+  const vivants = { 1: 0, 2: 0 };
+  for (const j of this.joueurs.values()) if (!j.elimine && !j.mort) vivants[j.equipe]++;
+  const base = {
+    t: 'MODE', mode: 'battle',
+    manche: this.manche, phase: this.manchePhase,
+    reste: Math.max(0, Math.round(this.mancheT)),
+    gagnees: this.manchesGagnees, vivants,
+    armes: (this.armesSol || []).map(a => ({
+      id: a.id, arme: a.arme, rarete: a.rarete, x: a.x, y: a.y, lache: a.lache ? 1 : 0
+    }))
+  };
+  for (const j of this.joueurs.values()) {
+    j.envoyer(Object.assign({}, base, {
+      bouclier: j.bouclier && t < j.bouclier ? Math.round((j.bouclier - t) / 100) / 10 : 0,
+      elimine: j.elimine ? 1 : 0,
+      inventaire: j.inventaire
+    }));
+  }
+};
+Salle.prototype.diffuserPoursuite = function () {
+  const t = Date.now();
+  const tous = [...this.joueurs.values()].map(etatModes);
+  const fugitifs = tous.filter(j => j.equipe === 1);
+  const E = this.extraction || {};
+  const commun = {
+    t: 'MODE', mode: 'poursuite',
+    avance: Math.max(0, Math.round(this.avanceReste || 0)),
+    reste: Math.max(0, Math.round(this.tempsRestant)),
+    extraction: {
+      variante: E.variante, ouverte: !!E.ouverte,
+      zones: E.ouverte ? E.zones : [],
+      caisse: this.caisseAttrapee ? null : (E.caisse || null),
+      retard: E.ouverte ? 0 : Math.max(0, Math.round(E.retard || 0))
+    },
+    barrages: (this.barrages || []).map(b => ({ x: b.x, y: b.y })),
+    barragePrevu: this.barragePrevu || null,
+    vivants: {
+      1: fugitifs.filter(f => !f.elimine && !f.extrait).length,
+      2: tous.filter(j => j.equipe === 2 && !j.mort).length
+    }
+  };
+  /* Les Chasseurs reçoivent les positions connues des Fugitifs avec leur
+     âge ; les Fugitifs ne reçoivent jamais celle d'un Chasseur.        */
+  const traque = fugitifs.filter(f => !f.elimine && !f.extrait).map(f => {
+    const direct = f.verrou && t < f.verrou;
+    return {
+      id: f.id, pseudo: f.pseudo,
+      x: direct ? Math.round(f.x) : f.vuX, y: direct ? Math.round(f.y) : f.vuY,
+      age: direct ? 0 : (f.vuT ? Math.round((t - f.vuT) / 1000) : -1),
+      direct: direct ? 1 : 0
+    };
+  });
+  for (const j of tous) {
+    const msg = Object.assign({}, commun, {
+      camp: j.equipe, elimine: j.elimine ? 1 : 0, extrait: j.extrait ? 1 : 0,
+      extracT: Math.round((j.extracT || 0) * 10) / 10,
+      verrou: j.verrou && t < j.verrou ? Math.round((j.verrou - t) / 1000) : 0
+    });
+    if (j.equipe === 2) msg.traque = traque;
+    else msg.raccourcis = this.raccourcisVus || [];
+    j.envoyer(msg);
+  }
+};
+
+/* ============================ FIN DE PARTIE ==========================
+   Récompenses, titres de 24 h et classement dédié par mode.
+   ===================================================================== */
+const _terminerBase = Salle.prototype.terminer;
+Salle.prototype.terminer = function (raison) {
+  if (this.phase === 'fin') return;
+  if (this.mode === 'poursuite' && raison === 'temps') {
+    // le temps expire : les Fugitifs encore en vie l'emportent
+    const debout = [...this.joueurs.values()].some(j => j.equipe === 1 && !j.elimine);
+    raison = debout ? 'fugitifs' : 'chasseurs';
+  }
+  if (this.mode === 'battle' || this.mode === 'poursuite') this.recompenser(raison);
+  _terminerBase.call(this, raison);
+};
+
+Salle.prototype.recompenser = function (raison) {
+  const gagnant = (raison === 'fugitifs' || raison === 'equipe1') ? 1
+    : (raison === 'chasseurs' || raison === 'equipe2') ? 2 : 0;
+  const liste = [...this.joueurs.values()].map(etatModes);
+
+  /* MVP de la course poursuite : dernier survivant ou extraction solo
+     chez les Fugitifs, le plus d'éliminations chez les Chasseurs.      */
+  let mvpFug = null, mvpChas = null;
+  if (this.mode === 'poursuite') {
+    const fug = liste.filter(j => j.equipe === 1);
+    const extraits = fug.filter(j => j.extrait);
+    const debout = fug.filter(j => !j.elimine);
+    if (extraits.length === 1) mvpFug = extraits[0];
+    else if (debout.length === 1) mvpFug = debout[0];
+    for (const c of liste.filter(j => j.equipe === 2))
+      if (!mvpChas || c.kills > mvpChas.kills) mvpChas = c;
+    if (mvpChas && !mvpChas.kills) mvpChas = null;
+  }
+  /* En battle, les trois meilleurs scores reçoivent un titre. */
+  const podium = this.mode === 'battle'
+    ? liste.slice().sort((a, b) => b.score - a.score || b.kills - a.kills).slice(0, 3) : [];
+
+  for (const j of liste) {
+    const victoire = !!gagnant && j.equipe === gagnant;
+    let mult = victoire ? 2 : 0.5;
+    let titre = '';
+    if (j === mvpFug) { mult = 3; titre = 'FUGITIF INSAISISSABLE'; }
+    else if (j === mvpChas) { mult = 2; titre = 'CHASSEUR IMPLACABLE'; }
+    else if (this.mode === 'battle') {
+      const r = podium.indexOf(j);
+      if (r === 0) titre = 'CHAMPION DE L’ARÈNE';
+      else if (r === 1) titre = 'VICE-CHAMPION';
+      else if (r === 2) titre = 'TROISIÈME LAME';
+    }
+    if (titre) donnerTitre(j.pseudo, titre);
+    /* L'argent en jeu reste un miroir : on annonce le gain, le client
+       l'applique à son portefeuille, le serveur borne la variation.    */
+    const argent = Math.round(Math.max(0, j.score) * 0.6 * mult) + (victoire ? 600 : 150);
+    j.argent = clamp(j.argent + argent, 0, 99999999);
+    j.envoyer({
+      t: 'EVENT', type: 'recompense',
+      d: {
+        argent, mult, titre, victoire: victoire ? 1 : 0,
+        mvp: j === mvpFug ? 'fugitif' : j === mvpChas ? 'chasseur' : '',
+        manches: this.mode === 'battle' ? this.manchesGagnees : null
+      }
+    });
+  }
+  log('INFO', 'recompenses', { salle: this.code, mode: this.mode, raison, gagnant });
+};
+
+/* Le classement final annonce les camps, les ratios et les titres. */
+const _classBase = Salle.prototype.classement;
+Salle.prototype.classement = function () {
+  const l = _classBase.call(this);
+  if (this.mode !== 'battle' && this.mode !== 'poursuite') return l;
+  for (const c of l) {
+    c.titre = titreDe(c.pseudo);
+    c.camp = nomCamp(this.mode, c.equipe);
+    c.ratio = c.morts ? Math.round(c.kills / c.morts * 100) / 100 : c.kills;
+    const j = [...this.joueurs.values()].find(p => p.pseudo === c.pseudo);
+    if (j) { c.mvp = j.mvp || 0; c.elimine = !!j.elimine; }
+  }
+  return l;
+};
+
+/* Un départ en cours de partie peut vider un camp : on réévalue. */
+const _retirerBase = Salle.prototype.retirer;
+Salle.prototype.retirer = function (j) {
+  const etait = this.joueurs.has(j.id);
+  _retirerBase.call(this, j);
+  if (!etait || this.phase !== 'jeu') return;
+  if (this.mode === 'poursuite') this.reglesPoursuite(0);
+  else if (this.mode === 'battle' && this.manchePhase === 'jeu') this.reglesBattle(0);
+};
 
 /* =======================================================================
    HUB — l'ensemble des salles et des connexions
@@ -1263,8 +2457,24 @@ wss.on('connection', (ws, req) => {
     t: 'BIENVENUE', id: j.id, protocole: PROTOCOLE, tick: TICK_HZ,
     modes: Object.keys(MODES).map(k => ({
       id: k, nom: MODES[k].nom, min: MODES[k].min, max: MODES[k].max,
-      duree: MODES[k].duree, equipes: MODES[k].equipes, desc: MODES[k].desc
+      duree: MODES[k].duree, equipes: MODES[k].equipes, desc: MODES[k].desc,
+      /* `camps: true` = le joueur choisit son côté dans le salon de CE
+         mode ; `manches: true` = partie découpée en manches.          */
+      camps: !!MODES[k].camps, manches: !!MODES[k].manches
     })),
+    formats: { battle: BATTLE_FORMATS, poursuite: POURSUITE_FORMATS },
+    extractions: EXTRACTIONS,
+    // nombre de joueurs en ligne par mode, pour les tuiles du menu
+    enLigne: (() => {
+      const n = {};
+      for (const s of HUB.salles.values()) n[s.mode] = (n[s.mode] || 0) + s.joueurs.size;
+      return n;
+    })(),
+    sallesParMode: (() => {
+      const n = {};
+      for (const s of HUB.salles.values()) n[s.mode] = (n[s.mode] || 0) + 1;
+      return n;
+    })(),
     salles: HUB.liste('')
   });
 
@@ -1328,9 +2538,31 @@ function router(j, m) {
           policeDiff: clamp(Math.round(nombre(m.policeDiff, 1)), 0, 2),
           tours: clamp(Math.round(nombre(m.tours, 2)), 1, 9),
           meteoFixe: typeof m.meteoFixe === 'string' && METEO_SUITES[m.meteoFixe] ? m.meteoFixe : '',
-          heureDepart: clamp(nombre(m.heureDepart, 0.34), 0, 0.999)
+          heureDepart: clamp(nombre(m.heureDepart, 0.34), 0, 0.999),
+
+          /* --- options du mode BATTLE --- */
+          // manches à remporter : 3, 5 ou 7
+          manches: parmi(m.manches, [3, 5, 7], 3),
+          // durée d'une manche : 90, 120 ou 180 secondes
+          dureeManche: parmi(m.dureeManche, [90, 120, 180], 120),
+          legendaires: m.legendaires !== undefined ? !!m.legendaires : true,
+
+          /* --- options du mode COURSE POURSUITE --- */
+          // durée maximale : 8, 10 ou 15 minutes
+          dureeMax: parmi(m.dureeMax, [480, 600, 900], 600),
+          // avance des Fugitifs : 20, 30 ou 45 secondes
+          avance: parmi(m.avance, [20, 30, 45], 30),
+          // fréquence de mise à jour de la minimap des Chasseurs
+          majMinimap: parmi(m.majMinimap, [10, 15, 30], 15),
+          // variante d'extraction : vide = tirée au sort au lancement
+          variante: typeof m.variante === 'string' && EXTRACTIONS.some(e => e.id === m.variante) ? m.variante : '',
+          // format annoncé dans la liste des salles (2v2, 3v3…)
+          format: propre(m.format, 6)
         }
       };
+      /* Le format impose l'effectif : 2v2 = 4 joueurs, 5v5 = 10. */
+      const formats = mode === 'battle' ? BATTLE_FORMATS : mode === 'poursuite' ? POURSUITE_FORMATS : null;
+      if (formats && formats[def.options.format]) def.max = formats[def.options.format];
       const s = HUB.creer(def);
       if (!s) { j.envoyer({ t: 'EVENT', type: 'refus', d: { txt: 'Serveur saturé, réessayez plus tard' } }); return; }
       const err = s.ajouter(j, pseudo);
@@ -1367,6 +2599,10 @@ function router(j, m) {
         if (hote) hote.envoyer({ t: 'EVENT', type: 'tousprets', d: {} });
       }
       return;
+
+    /* Choix de camp : n'existe que dans une salle de course poursuite,
+       et seulement avant le lancement. Aucun autre mode ne l'accepte. */
+    case 'CAMP': if (j.salle) j.salle.choisirCamp(j, m); return;
 
     case 'GEOMETRIE': if (j.salle) j.salle.recevoirGeometrie(j, m); return;
     case 'START': if (j.salle) j.salle.lancer(j); return;

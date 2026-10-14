@@ -20,18 +20,19 @@ en silence — jamais une exception.
 | --- | --- | --- |
 | `PING` | `ts`, `rtt` | mesure de latence, maintient la connexion éveillée |
 | `LIST` | `mode` (facultatif) | demande la liste des salles |
-| `CREATE` | `pseudo`, `nom`, `mode`, `max`, `seed`, `motdepasse`, `feuAmi`, `equipes`, `filtre`, `trafic`, `policeDiff`, `tours`, `meteoFixe`, `heureDepart` | crée une salle et y entre |
+| `CREATE` | `pseudo`, `nom`, `mode`, `max`, `seed`, `motdepasse`, `feuAmi`, `equipes`, `filtre`, `trafic`, `policeDiff`, `tours`, `meteoFixe`, `heureDepart`, `manches`, `dureeManche`, `legendaires`, `dureeMax`, `avance`, `majMinimap`, `variante`, `format` | crée une salle et y entre |
+| `CAMP` | `camp` (1 = Fugitifs, 2 = Chasseurs) | **course poursuite seulement**, et seulement avant le lancement : choix de camp pour cette partie |
 | `JOIN` | `salle` (code à 4 caractères), `pseudo`, `motdepasse` | rejoint une salle |
 | `LEAVE` | — | quitte la salle |
 | `READY` | `v` (booléen) | se déclare prêt dans le salon |
-| `GEOMETRIE` | `spawns[]`, `checkpoints[]`, `extraction` | **hôte seulement** : géométrie du monde (voir plus bas) |
+| `GEOMETRIE` | `spawns[]`, `checkpoints[]`, `extraction`, `arene{}`, `departs[]`, `extractions[]`, `barrages[]`, `raccourcis[]`, `caisses[]` | **hôte seulement** : géométrie du monde (voir plus bas) |
 | `START` | — | **hôte seulement** : lance le compte à rebours |
 | `OPTIONS` | `options{}` | **hôte seulement** : modifie les réglages de la salle |
 | `EXPEL` | `id` | **hôte seulement** : expulse un joueur |
 | `INPUT` | `seq`, `x`, `y`, `a`, `m`, `hp`, `w`, `nage`, `dedans`, `veh` | position et état, 20 fois par seconde |
 | `SHOOT` | `angle`, `arme` | un tir est parti (lueur et bruit chez les autres) |
 | `TOUCHE` | `cible`, `arme`, `degats` | revendication d'impact sur un joueur |
-| `INTERACT` | `type`, `cible`, `kind`, `x`, `y`, `montant` | `monter`, `descendre`, `etoiles`, `argent` |
+| `INTERACT` | `type`, `cible`, `kind`, `x`, `y`, `montant` | `monter`, `descendre`, `etoiles`, `argent`, `arme` (ramassage d'une arme au sol ou du coffre de base, mode Battle) |
 | `CHAT` | `texte`, `canal` (`tous`/`equipe`/`prive`), `vers` | message |
 | `MORT` | `cause` | mort causée par l'environnement ou la police locale |
 | `PROFIL` | `pseudo`, `donnees` | sauvegarde facultative vers la base |
@@ -51,12 +52,38 @@ en silence — jamais une exception.
 | `CORRECTION` | `x`, `y`, `raison` | position refusée : voici la bonne |
 | `FIN` | `raison`, `classement[]` | fin de manche |
 | `KICK` | `raison` | exclusion |
+| `MODE_INIT` | `mode`, `equipe`, `camp`, `nomCamp`, `options`, + selon le mode : `arene`, `manches`, `dureeManche` · `extraction`, `avance`, `majMinimap`, `depart`, `veh[]` | envoyé juste après `WORLD_INIT` dans les modes `battle` et `poursuite` |
+| `MODE` | état propre au mode, **5 fois par seconde**, différent d'un joueur à l'autre | voir plus bas |
 
 ### Types d'`EVENT`
 
-`refus` · `decompte` · `tousprets` · `meteo` · `evenement` · `degats` ·
-`mort` · `respawn` · `retour` · `tir` · `monte` · `descend` · `checkpoint` ·
-`tour` · `arrestation` · `extraction`
+Communs : `refus` · `decompte` · `tousprets` · `meteo` · `evenement` ·
+`degats` · `mort` · `respawn` · `retour` · `tir` · `monte` · `descend` ·
+`checkpoint` · `tour` · `arrestation` · `extraction` · `recompense`
+
+Mode **Battle** : `manche-debut` · `manche-feu` · `manche-fin` ·
+`arme-prise` · `arme-partie` · `armes-lachees` · `soin`
+
+Mode **Course poursuite** : `avance` · `verrou` · `verrou-pose` ·
+`barrage-annonce` · `barrage` · `raccourci` · `renfort` ·
+`extraction-ouverte` · `extraction-cours`
+
+### Format d'un `MODE`
+
+Un message à part, hors du `TICK`, pour deux raisons : il n'a de sens que
+dans ces deux modes, et **son contenu diffère d'un joueur à l'autre**.
+
+En `battle` : `manche`, `phase` (`gel` / `jeu` / `resultats`), `reste`,
+`gagnees{1,2}`, `vivants{1,2}`, `armes[]` (toutes les armes au sol, avec
+leur rareté), plus, propre au destinataire, `bouclier`, `elimine` et
+`inventaire[]` — la liste autoritaire de ce qu'il possède.
+
+En `poursuite` : `avance`, `reste`, `extraction{}`, `barrages[]`,
+`barragePrevu`, `vivants{1,2}`, puis **selon le camp** : un Chasseur reçoit
+`traque[]` (dernière position connue de chaque Fugitif, avec son `age` en
+secondes, ou `direct: 1` pendant un verrou), un Fugitif reçoit
+`raccourcis[]`. Un Fugitif ne reçoit **jamais** la position d'un Chasseur :
+l'asymétrie est tenue par le serveur, pas par l'interface.
 
 ---
 
@@ -162,8 +189,47 @@ carte et dès le salon d'attente :
 - `checkpoints` — des carrefours répartis autour du centre, donc reliés par de vraies rues ;
 - `extraction` — le point sûr le plus éloigné du départ.
 
+Les deux modes ajoutés en demandent davantage, toujours selon la même règle :
+
+- `arene` — pour le mode **Battle** : `rect` (l'enceinte de 1500 × 1500 px),
+  `centre`, les deux `bases` (chacune avec son coffre et son point de soin)
+  et `zones[]`, les emplacements où des armes peuvent apparaître. Le serveur
+  refuse l'arène sous 15 emplacements, et refuse de lancer la partie tant
+  qu'il ne l'a pas reçue. L'arène elle-même est tirée de la graine de la
+  salle par un générateur dédié : tous les clients obtiennent la même, sans
+  rien s'échanger ;
+- `departs[]` — un point par biome, pour la **course poursuite** ;
+- `extractions[]` — un candidat par biome. Le serveur choisit **dans un
+  biome différent du départ des Fugitifs**, et le plus loin possible ;
+- `barrages[]` — des carrefours d'axes principaux ;
+- `raccourcis[]` — chemins de terre, ruelles et pontons ;
+- `caisses[]` — emplacements possibles de la caisse spéciale de la variante
+  « extraction sous conditions ».
+
 Le serveur en valide la forme et les bornes, puis en devient **seul juge** :
-franchissements, tours, arrestations et extractions sont décidés par lui.
+franchissements, tours, arrestations, manches, armes ramassées, verrous de
+traque et extractions sont décidés par lui.
+
+---
+
+## Modes de jeu et choix de camp
+
+Six modes : `coop`, `bataille`, `course`, `police`, `battle`, `poursuite`.
+`BIENVENUE` les annonce avec deux drapeaux qui décident de l'interface :
+`camps` (le joueur choisit son côté) et `manches` (partie découpée en
+manches).
+
+**Un seul mode a `camps: true` : `poursuite`.** Le choix de camp n'existe
+nulle part ailleurs — ni à la création d'un compte, ni dans un profil, ni
+dans le monde ouvert, ni en `battle`. C'est un réglage de **salle**, posé
+par le message `CAMP` dans le salon d'attente et valable pour cette partie
+seulement ; à la partie suivante, chacun peut prendre l'autre côté. Dans
+tous les autres modes, les équipes sont formées par le serveur
+(`repartirEquipes`) ou il n'y en a pas.
+
+Le serveur refuse de lancer une course poursuite tant qu'un joueur n'a pas
+choisi, qu'un camp est vide, ou que l'écart dépasse **un joueur** : il le dit
+dans le salon et demande des volontaires pour changer de côté.
 
 ---
 
