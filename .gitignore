@@ -1,0 +1,31 @@
+.godot/
+dist/
+node_modules/
+.manus-logs/
+# --- injected at scaffold time (see gitignore.project in the template) ---
+/assets/**/*.png
+/assets/**/*.jpg
+/assets/**/*.jpeg
+/assets/**/*.webp
+/assets/**/*.gif
+/assets/**/*.bmp
+/assets/**/*.svg
+/assets/**/*.ico
+/assets/**/*.ogg
+/assets/**/*.wav
+/assets/**/*.mp3
+/assets/**/*.m4a
+/assets/**/*.mp4
+/assets/**/*.webm
+/assets/**/*.ttf
+/assets/**/*.otf
+/assets/**/*.woff
+/assets/**/*.woff2
+
+!site/**
+
+# Template fonts (subset WOFF2) restore from assets.lock.json like other media.
+
+# secrets du serveur multijoueur (le modele .env.example reste versionne)
+.env
+.env.local

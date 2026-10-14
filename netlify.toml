@@ -1,0 +1,61 @@
+# =====================================================================
+# LIBERTY LAKE — hébergement statique sur Netlify
+# ---------------------------------------------------------------------
+# Le jeu est un seul fichier HTML : il n'y a rien à construire.
+# Le serveur multijoueur (server.js) n'est PAS hébergé ici — Netlify ne
+# garde pas de processus WebSocket vivant. Il tourne sur Railway ou
+# Render ; ce fichier ne sert que le client et pose les bons en-têtes.
+#
+# Déploiement : connecter le dépôt GitHub, branche principale, puis
+# laisser ces réglages faire le reste (déploiement automatique à chaque
+# push). Voir docs/HEBERGEMENT.md.
+# =====================================================================
+
+[build]
+  # aucune commande de build : on publie la racine du dépôt telle quelle
+  publish = "."
+  command = ""
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# ---------------------------------------------------------------------
+# Adresses d'entrée : la racine et /jeu servent le fichier du jeu.
+# ---------------------------------------------------------------------
+[[redirects]]
+  from = "/"
+  to = "/liberty-lake.html"
+  status = 200
+
+[[redirects]]
+  from = "/jeu"
+  to = "/liberty-lake.html"
+  status = 200
+
+# ---------------------------------------------------------------------
+# En-têtes communs.
+#  · Cross-Origin-Opener-Policy / Embedder-Policy : isolation d'origine,
+#    elle débloque les timers haute précision dont profite le rendu
+#    canvas. « credentialless » plutôt que « require-corp » pour ne pas
+#    casser une ressource tierce éventuelle.
+#  · Content-Security-Policy : connect-src doit lister le serveur de jeu,
+#    sinon le navigateur refuse l'ouverture de la WebSocket. REMPLACEZ
+#    les hôtes ci-dessous par le vôtre après déploiement du serveur.
+# ---------------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "credentialless"
+    Cross-Origin-Resource-Policy = "same-origin"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss://liberty-lake-serveur.up.railway.app https://liberty-lake-serveur.up.railway.app wss://liberty-lake-serveur.onrender.com https://liberty-lake-serveur.onrender.com ws://localhost:3000 http://localhost:3000; frame-ancestors 'none'"
+
+# Le fichier du jeu change à chaque déploiement : on revalide toujours
+# plutôt que de risquer de servir une version périmée depuis le cache.
+[[headers]]
+  for = "/liberty-lake.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

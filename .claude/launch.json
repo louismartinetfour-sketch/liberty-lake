@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "liberty-lake",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "process.env.SERVE_STATIC='1'; require('./server.js');"],
+      "port": 3000
+    }
+  ]
+}
