@@ -322,8 +322,9 @@ Sans elle, tout fonctionne : les parties se jouent, mais rien n'est archivé
 d'un redémarrage à l'autre. Avec elle, les classements sont conservés.
 
 1. <https://supabase.com> → **New project** (gratuit).
-2. **SQL Editor** → collez le script SQL donné au §3 de
-   [HEBERGEMENT.md](HEBERGEMENT.md) → **Run**.
+2. **SQL Editor** → **New query** → collez tout le contenu de
+   [supabase.sql](supabase.sql) → **Run**. Le script est prêt à l'emploi,
+   rien à y modifier.
 3. **Project Settings → API** : relevez l'URL du projet et la clé
    `service_role`.
 4. Render → **Environment** → ajoutez :
