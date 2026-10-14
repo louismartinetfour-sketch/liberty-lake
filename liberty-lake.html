@@ -313,6 +313,36 @@ html[data-theme="frontier"] .panel{background:radial-gradient(1100px 700px at 14
 .mp-salonsaisie input{flex:1;background:rgba(6,12,22,.7);border:1px solid #2a3c56;border-radius:9px;
   color:var(--texte);padding:9px 12px;font:600 13px var(--police)}
 .mp-salonsaisie input:focus{outline:none;border-color:#5ab4ff}
+/* --- bandeau de salle : le code d'abord, c'est ce qu'on transmet --- */
+.mp-bandeau-salle{display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-bottom:14px;
+  padding:14px 18px;border-radius:14px;background:var(--verre2);border:1px solid var(--bord)}
+.mp-code-bloc{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.mp-code-etiq{font:700 9px var(--police);letter-spacing:2px;color:var(--cyan)}
+.mp-code{font-family:var(--titre);font-size:40px;font-weight:700;letter-spacing:9px;line-height:1;
+  color:var(--or);text-shadow:0 0 26px rgba(255,209,102,.3)}
+.mp-copier{margin:2px 0 0;padding:5px 11px;font:700 9.5px var(--police);letter-spacing:1.2px;
+  border-radius:8px;color:#061220;background:linear-gradient(95deg,#5b8fd8,#7fd3ff);box-shadow:none}
+.mp-copier.fait{background:linear-gradient(95deg,#7ae582,#c8f08a)}
+.mp-bandeau-infos{flex:1;min-width:230px;display:flex;flex-direction:column;gap:4px}
+.mp-ligne-mode{font:800 13px var(--police);letter-spacing:1px;color:var(--texte)}
+.mp-ligne-mode .mp-sep{margin:0 8px;color:var(--muet);font-weight:400}
+.mp-reglages-vus{display:flex;gap:7px;flex-wrap:wrap;margin-top:3px}
+.mp-reglages-vus span{font:700 9px var(--police);letter-spacing:1px;padding:3px 8px;border-radius:6px;
+  background:rgba(127,211,255,.1);color:var(--texte2)}
+.mp-compteur{font:700 10px var(--police);letter-spacing:1px;color:var(--muet);margin-left:auto}
+.mp-equipe-titre{font:700 9.5px var(--police);letter-spacing:1.6px;margin:12px 0 6px;
+  display:flex;align-items:center;gap:7px}
+.mp-equipe-titre::after{content:"";flex:1;height:1px;background:currentColor;opacity:.22}
+/* Les actions restent accessibles meme quand le salon depasse la
+   hauteur de l ecran : elles collent au bas du panneau. */
+.mp-actions{position:sticky;bottom:-32px;z-index:2;display:flex;gap:9px;align-items:center;flex-wrap:wrap;
+  margin:14px -34px -32px;padding:14px 34px 18px;
+  border-top:1px solid rgba(150,190,235,.14);
+  background:linear-gradient(180deg,rgba(16,26,42,.86),rgba(12,20,34,.97));
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+@media (max-width:640px){.mp-actions{margin:14px -18px -24px;padding:12px 18px 14px}}
+.mp-actions button{margin-top:0}
+.mp-attente{flex:1;font-size:12px;color:var(--muet)}
 .mp-decompte{font-family:var(--titre);font-size:54px;font-weight:700;letter-spacing:6px;color:var(--or);
   text-align:center;margin:6px 0;text-shadow:0 0 30px rgba(255,209,102,.35)}
 .mp-erreur{margin-top:10px;padding:9px 13px;border-radius:10px;font-size:12.5px;
@@ -663,19 +693,32 @@ html[data-theme="frontier"] .panel{background:radial-gradient(1100px 700px at 14
 
   <!-- ---------------- écran 3 : salon d'attente ---------------- -->
   <div id="mp-ecran-salon" style="display:none">
-    <div class="mp-grille">
-      <div class="mp-bloc">
-        <h2 id="mp-salon-titre">Salon d’attente</h2>
-        <div id="mp-salon-infos" class="mp-mode-desc"></div>
-        <div class="mp-decompte" id="mp-decompte" style="display:none">5</div>
-        <div id="mp-salon-joueurs" style="margin-top:12px"></div>
-        <div class="mp-rangee">
-          <button type="button" class="alt" id="mp-pret" style="background:linear-gradient(95deg,#8ad45a,#c8f08a);color:#0d2010">JE SUIS PRÊT</button>
-          <button type="button" class="alt" id="mp-lancer" style="background:linear-gradient(95deg,#ffc04a,#ff6a6d);color:#241105;display:none">LANCER LA PARTIE</button>
-          <button type="button" class="alt" id="mp-quitter" style="background:linear-gradient(95deg,#55637a,#8c9bb3)">QUITTER LA SALLE</button>
-        </div>
+
+    <!-- bandeau : ce qu'on regarde en premier, et ce qu'on partage -->
+    <div class="mp-bandeau-salle">
+      <div class="mp-code-bloc">
+        <span class="mp-code-etiq">CODE DE LA SALLE</span>
+        <span class="mp-code" id="mp-salon-code">----</span>
+        <button type="button" class="mp-copier" id="mp-copier-lien" title="Copier le lien d’invitation">COPIER LE LIEN</button>
       </div>
+      <div class="mp-bandeau-infos">
+        <div class="mp-ligne-mode"><span id="mp-salon-mode">—</span><span class="mp-sep">·</span><span id="mp-salon-effectif">0 / 0</span><span class="mp-sep">·</span><span id="mp-salon-phase">en attente</span></div>
+        <div class="mp-mode-desc" id="mp-salon-desc"></div>
+        <div class="mp-reglages-vus" id="mp-salon-reglages"></div>
+      </div>
+      <div class="mp-decompte" id="mp-decompte" style="display:none">5</div>
+    </div>
+
+    <div class="mp-grille">
+      <!-- colonne gauche : qui est là -->
       <div class="mp-bloc">
+        <h2>Joueurs <span class="mp-compteur" id="mp-salon-prets"></span></h2>
+        <div id="mp-salon-joueurs"></div>
+      </div>
+
+      <!-- colonne droite : les réglages, puis la discussion -->
+      <div class="mp-bloc">
+        <div id="mp-salon-options"></div>
         <h2>Chat de pré-partie</h2>
         <div class="mp-salonchat">
           <div class="mp-salonmsg" id="mp-salon-msg"></div>
@@ -684,8 +727,15 @@ html[data-theme="frontier"] .panel{background:radial-gradient(1100px 700px at 14
             <button type="button" class="alt" id="mp-salon-envoi">ENVOYER</button>
           </div>
         </div>
-        <div id="mp-salon-options"></div>
       </div>
+    </div>
+
+    <!-- pied : les actions, toujours au même endroit -->
+    <div class="mp-actions">
+      <button type="button" class="alt" id="mp-pret" style="background:linear-gradient(95deg,#8ad45a,#c8f08a);color:#0d2010">JE SUIS PRÊT</button>
+      <button type="button" class="alt" id="mp-lancer" style="background:linear-gradient(95deg,#ffc04a,#ff6a6d);color:#241105;display:none">LANCER LA PARTIE</button>
+      <span class="mp-attente" id="mp-salon-attente"></span>
+      <button type="button" class="alt" id="mp-quitter" style="background:linear-gradient(95deg,#55637a,#8c9bb3)">QUITTER LA SALLE</button>
     </div>
   </div>
 </div>
@@ -19788,6 +19838,12 @@ class Reseau {
         LOBBY.majFormulaire();
         LOBBY.majSalles(m.salles || []);
         if (!this.salle) LOBBY.montrer('salles');
+        // arrivee par lien d'invitation : on enchaine tout seul
+        if (this.salleVisee) {
+          const code = this.salleVisee;
+          this.salleVisee = null;
+          this.envoyer({ t: 'JOIN', salle: code, pseudo: this.prefs.pseudo });
+        }
         return;
 
       case 'PONG':
@@ -20508,6 +20564,28 @@ class LobbyUI {
       NET.derMdp = mdp;
       NET.envoyer({ t: 'JOIN', salle: code, pseudo: el('mp-pseudo').value, motdepasse: mdp });
     };
+    /* Copier le lien d'invitation. L'API moderne exige un contexte
+       securise ; on garde une solution de repli pour les autres cas. */
+    const copier = el('mp-copier-lien');
+    if (copier) copier.onclick = async () => {
+      const lien = this.lienInvitation();
+      if (!lien) return;
+      let ok = false;
+      try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(lien); ok = true; }
+      } catch (e) { ok = false; }
+      if (!ok) {
+        // repli : un champ temporaire, selectionne puis copie
+        const t = document.createElement('textarea');
+        t.value = lien; t.style.position = 'fixed'; t.style.opacity = '0';
+        document.body.appendChild(t); t.select();
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(t);
+      }
+      copier.textContent = ok ? 'LIEN COPIÉ' : lien;
+      copier.className = ok ? 'mp-copier fait' : 'mp-copier';
+      setTimeout(() => { copier.textContent = 'COPIER LE LIEN'; copier.className = 'mp-copier'; }, 2600);
+    };
     el('mp-mode').onchange = () => this.majFormulaire();
     el('mp-creer').onclick = () => this.creer();
     el('mp-pret').onclick = () => {
@@ -20672,40 +20750,86 @@ class LobbyUI {
 
   /* --------------------------- salon d'attente ------------------------ */
   majSalon(s) {
-    if (!s || !this.el('mp-salon-titre')) return;
+    if (!s || !this.el('mp-salon-code')) return;
     const hote = s.hote === NET.moi;
-    this.el('mp-salon-titre').textContent = 'Salle ' + s.code + ' — ' + s.modeNom;
-    this.el('mp-salon-infos').innerHTML =
-      'Graine <b>' + this.echapper(s.seed) + '</b> · ' + s.joueurs.length + ' / ' + s.max + ' joueurs · ' +
-      (s.phase === 'attente' ? 'en attente' : s.phase === 'jeu' ? 'partie en cours' : this.echapper(s.phase)) +
-      '<br>Feu ami : <b>' + (s.options.feuAmi ? 'oui' : 'non') + '</b>' +
-      ' · Météo : <b>' + this.echapper(s.options.meteoFixe || 'cycle complet') + '</b>' +
-      ' · Trafic : <b>' + (s.options.trafic ? 'oui' : 'non') + '</b>' +
-      (s.mode === 'course' ? ' · Tours : <b>' + s.options.tours + '</b>' : '');
+    const def = (NET.modes || []).find(m => m.id === s.mode);
+
+    /* --- bandeau : le code, puis ce qui décrit la partie --- */
+    this.el('mp-salon-code').textContent = s.code;
+    this.el('mp-salon-mode').textContent = s.modeNom;
+    this.el('mp-salon-effectif').textContent = s.joueurs.length + ' / ' + s.max + ' joueurs';
+    const phases = { attente: 'en attente', decompte: 'départ imminent', jeu: 'partie en cours', fin: 'terminée' };
+    this.el('mp-salon-phase').textContent = phases[s.phase] || s.phase;
+    this.el('mp-salon-desc').textContent = def ? def.desc : '';
+    // réglages en pastilles : lisibles d'un coup d'œil, sans phrase à lire
+    const reglages = [
+      'Graine ' + s.seed,
+      'Feu ami : ' + (s.options.feuAmi ? 'oui' : 'non'),
+      'Météo : ' + (s.options.meteoFixe || 'cycle complet'),
+      'Trafic : ' + (s.options.trafic ? 'oui' : 'non')
+    ];
+    if (s.mode === 'course') reglages.push('Tours : ' + s.options.tours);
+    if (s.options.motdepasse) reglages.push('Salle privée');
+    this.el('mp-salon-reglages').innerHTML =
+      reglages.map(r => '<span>' + this.echapper(r) + '</span>').join('');
+
+    /* --- joueurs, groupés par camp quand le mode en a --- */
     const box = this.el('mp-salon-joueurs');
     box.innerHTML = '';
-    for (const j of s.joueurs) {
-      const d = document.createElement('div');
-      d.className = 'mp-joueur';
-      let etiq = '';
-      if (j.id === s.hote) etiq += '<span class="etiq hote">HÔTE</span>';
-      if (j.equipe) etiq += '<span class="etiq eq' + j.equipe + '">' + NET.nomEquipe(j.equipe) + '</span>';
-      if (j.pret) etiq += '<span class="etiq pret">PRÊT</span>';
-      if (j.latence) etiq += '<span class="etiq">' + (j.latence | 0) + ' ms</span>';
-      d.innerHTML = '<span class="pastille" style="background:' + this.echapper(j.couleur) +
-        ';color:' + this.echapper(j.couleur) + '"></span>' +
-        '<span class="nom">' + this.echapper(j.pseudo) + (j.id === NET.moi ? ' (vous)' : '') + '</span>' + etiq;
-      if (hote && j.id !== NET.moi) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'virer'; b.textContent = 'EXPULSER';
-        b.onclick = () => NET.envoyer({ t: 'EXPEL', id: j.id });
-        d.appendChild(b);
+    const camps = s.joueurs.some(j => j.equipe)
+      ? [[1, NET.nomEquipe(1), '#9ec5ff'], [2, NET.nomEquipe(2), '#ff6b6b'], [0, 'SANS ÉQUIPE', '#c6bde1']]
+      : [[0, '', '']];
+    for (const [eq, titre, col] of camps) {
+      const membres = s.joueurs.filter(j => (j.equipe || 0) === eq);
+      if (!membres.length) continue;
+      if (titre) {
+        const t = document.createElement('div');
+        t.className = 'mp-equipe-titre';
+        t.style.color = col;
+        t.textContent = titre;
+        box.appendChild(t);
       }
-      box.appendChild(d);
+      for (const j of membres) box.appendChild(this.ligneJoueur(j, s, hote));
     }
+
+    /* --- effectif prêt : l'hôte sait s'il peut lancer --- */
+    const prets = s.joueurs.filter(j => j.pret || j.id === s.hote).length;
+    this.el('mp-salon-prets').textContent = prets + ' / ' + s.joueurs.length + ' prêts';
+    const minimum = def ? def.min : 1;
+    const manque = minimum - s.joueurs.length;
+    this.el('mp-salon-attente').textContent = s.phase !== 'attente' ? ''
+      : manque > 0 ? (manque === 1 ? 'Il manque un joueur' : 'Il manque ' + manque + ' joueurs')
+        : hote ? '' : 'En attente du lancement par l\u2019hôte';
+
     this.el('mp-lancer').style.display = hote && s.phase === 'attente' ? 'inline-block' : 'none';
+    this.el('mp-pret').style.display = s.phase === 'attente' ? 'inline-block' : 'none';
     this.el('mp-decompte').style.display = s.phase === 'decompte' ? 'block' : 'none';
     this.majOptionsHote(s, hote);
+  }
+  /* Une ligne de la liste des joueurs. */
+  ligneJoueur(j, s, hote) {
+    const d = document.createElement('div');
+    d.className = 'mp-joueur';
+    let etiq = '';
+    if (j.id === s.hote) etiq += '<span class="etiq hote">HÔTE</span>';
+    if (j.pret) etiq += '<span class="etiq pret">PRÊT</span>';
+    if (j.latence) etiq += '<span class="etiq">' + (j.latence | 0) + ' ms</span>';
+    d.innerHTML = '<span class="pastille" style="background:' + this.echapper(j.couleur) +
+      ';color:' + this.echapper(j.couleur) + '"></span>' +
+      '<span class="nom">' + this.echapper(j.pseudo) + (j.id === NET.moi ? ' (vous)' : '') + '</span>' + etiq;
+    if (hote && j.id !== NET.moi) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'virer'; b.textContent = 'EXPULSER';
+      b.onclick = () => NET.envoyer({ t: 'EXPEL', id: j.id });
+      d.appendChild(b);
+    }
+    return d;
+  }
+  /* Lien d'invitation : l'adresse du jeu suivie du code de la salle.
+     Celui qui l'ouvre arrive directement dans le salon.              */
+  lienInvitation() {
+    if (!NET.salle) return '';
+    return location.origin + location.pathname + '?salle=' + NET.salle.code;
   }
   /* Options modifiables, réservées à l'hôte et au temps d'attente. */
   majOptionsHote(s, hote) {
@@ -20885,7 +21009,18 @@ class LobbyUI {
 
 const NET = new Reseau();
 const LOBBY = new LobbyUI();
-addEventListener('load', () => setTimeout(() => LOBBY.installer(), 60));
+addEventListener('load', () => setTimeout(() => {
+  LOBBY.installer();
+  /* Lien d'invitation : « ?salle=XXXX » ouvre le lobby, se connecte et
+     rejoint la salle sans que l'invite ait rien a saisir.            */
+  let code = '';
+  try { code = (new URLSearchParams(location.search).get('salle') || '').trim().toUpperCase(); } catch (e) { }
+  if (!/^[A-Z0-9]{4}$/.test(code)) return;
+  NET.salleVisee = code;
+  LOBBY.ouvrir();
+  NET.message('Invitation reçue pour la salle ' + code, '#7ae582');
+  if (!NET.connecte()) NET.connecter(null, null);
+}, 60));
 
 /* ================== 5. BRANCHEMENTS SUR LE MOTEUR ====================
    Rien n'est réécrit : chaque méthode d'origine est encapsulée. En solo,
