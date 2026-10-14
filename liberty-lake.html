@@ -19380,6 +19380,10 @@ const NET_RECO_DELAI = 3000;      // ms entre deux tentatives de reconnexion
 const NET_RECO_MAX = 5;           // au-delà : bascule en solo
 const NET_CHAT_VIE = 8;           // s d'affichage d'un message
 const NET_CHAT_MAX = 7;           // messages visibles à l'écran
+/* Serveur de jeu public, propose par defaut quand la page vient d'Internet.
+   A changer ici si le serveur demenage ; le joueur peut de toute facon
+   saisir une autre adresse dans le lobby.                              */
+const NET_SERVEUR_PUBLIC = 'wss://liberty-lake-serveur.onrender.com/ws';
 
 /* Équipes : étiquette et couleur selon le mode. */
 const NET_EQUIPES = {
@@ -19635,14 +19639,15 @@ class Reseau {
   lirePrefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem('ll_mp') || '{}') || {}; } catch (e) { p = {}; }
-    if (!p.url) {
-      // par défaut : le serveur qui a servi la page si elle vient du
-      // réseau, sinon la machine locale
-      const h = location.hostname;
-      p.url = (h && h !== 'localhost' && h !== '127.0.0.1' && location.protocol !== 'file:')
-        ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
-        : 'ws://localhost:3000/ws';
-    }
+    /* Le site qui sert la page n'héberge pas le serveur de jeu : il est
+       statique. Sur Internet on propose donc le serveur public, en local
+       la machine du joueur. Une adresse déjà enregistrée qui pointe sur
+       le site lui-même est un reste de l'ancienne règle : on la corrige. */
+    const h = location.hostname;
+    const local = !h || h === 'localhost' || h === '127.0.0.1' || location.protocol === 'file:';
+    const defaut = local ? 'ws://localhost:3000/ws' : NET_SERVEUR_PUBLIC;
+    if (!p.url) p.url = defaut;
+    else if (!local && p.url.indexOf(location.host) >= 0) p.url = defaut;
     if (!p.pseudo) p.pseudo = 'Joueur' + (1 + Math.floor(Math.random() * 899));
     return p;
   }
