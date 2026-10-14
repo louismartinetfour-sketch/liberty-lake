@@ -3,7 +3,6 @@
   "version": "2.1.0",
   "private": true,
   "description": "Liberty Lake — jeu top-down en un fichier HTML, avec serveur multijoueur autoritaire",
-  "main": "server.js",
   "engines": {
     "node": ">=18"
   },

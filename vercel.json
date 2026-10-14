@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
   "buildCommand": "echo \"Rien a construire : le jeu est un fichier HTML statique.\"",
   "installCommand": "echo \"Aucune dependance cote site.\"",
   "cleanUrls": true,
