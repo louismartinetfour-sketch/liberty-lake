@@ -16404,268 +16404,357 @@ class Montagne {
 }
 
 /* ======================================================================
-   LES SEPT ACTES
-   Chaque acte impose un seuil : le Recruteur ne donne la quête suivante
-   que si le joueur a réuni l'argent ET le matériel. Les prix montent d'un
-   acte à l'autre, pour que la pression financière ne retombe jamais.
+   LES CINQ ACTES DE « EAUX TROUBLES »
+   L'histoire de Léo Marchand, mécanicien, dont le garage brûle. Aucun
+   acte n'impose de seuil d'argent : la progression est narrative, et ce
+   sont les personnages qui donnent les missions, chacun à son poste. Le
+   coefficient d'acte fait seulement monter les prix du monde ouvert.
    ====================================================================== */
 const ACTES = [
-  { n: 1, nom: 'LA RUE', lieu: 'ville pauvre', seuil: 0, coef: 1,
-    intro: 'Vous n’avez rien : ni arme, ni voiture, ni un billet en poche.' },
-  { n: 2, nom: 'LES DOCKS', lieu: 'port', seuil: 2000, coef: 1.15,
-    intro: 'Une arme correcte et un véhicule à vous : le port ne reçoit pas les piétons.' },
-  { n: 3, nom: 'L’ARGENT PROPRE', lieu: 'banlieue', seuil: 8000, coef: 1.3,
-    intro: 'Tenue habillée, voiture présentable, jeu de crochets. On ne braque plus, on s’invite.' },
-  { n: 4, nom: 'LES TERRES', lieu: 'campagne, lac et île', seuil: 20000, coef: 1.5,
-    intro: 'Un bateau, du carburant d’avance, et de quoi plonger.' },
-  { n: 5, nom: 'LA MACHINE', lieu: 'zone industrielle', seuil: 50000, coef: 1.75,
-    intro: 'Armement lourd et châssis renforcé : en face, ce ne sont plus des amateurs.' },
-  { n: 6, nom: 'LA MONTAGNE', lieu: 'massif du nord', seuil: 120000, coef: 2.1,
-    intro: 'Le massif ne se visite pas : il se mérite. Équipement complet ou rien.' },
-  { n: 7, nom: 'FINAL', lieu: 'zone militaire', seuil: 250000, coef: 2.5,
-    intro: 'Matériel d’infiltration militaire. Après, il n’y a plus de retour.' }
+  { n: 1, nom: 'LE FEU', lieu: 'banlieue', seuil: 0, coef: 1,
+    intro: 'Un garage, un père, une vieille voiture bleue. Il suffit d’une nuit pour tout perdre.' },
+  { n: 2, nom: 'LES GENS D’EN HAUT', lieu: 'ville', seuil: 0, coef: 1.15,
+    intro: 'L’incendie a été commandé. Reste à savoir qui a signé le chèque.' },
+  { n: 3, nom: 'LA TERRE', lieu: 'campagne', seuil: 0, coef: 1.3,
+    intro: 'Le garage n’était qu’une parcelle sur une carte beaucoup plus grande.' },
+  { n: 4, nom: 'LES QUAIS', lieu: 'lac et port', seuil: 0, coef: 1.5,
+    intro: 'Au port on retrouve une voiture, on perd un ami, et on apprend le vrai plan.' },
+  { n: 5, nom: 'LA TEMPÊTE', lieu: 'toute la carte, de nuit', seuil: 0, coef: 1.7,
+    intro: 'Une seule nuit d’orage pour sauver la banlieue basse — et pour choisir avec quoi on répare.' }
 ];
 
 /* raccourci de description d'un plan de scène : décor, personnages, locuteur, texte */
 const S = (d, p, qui, t, dur) => ({ d: d, p: p, qui: qui, t: t, dur: dur });
 
 /* ======================================================================
-   LES QUARANTE QUÊTES PRINCIPALES
-   Décrites en données : prérequis, étapes, scènes. Le moteur de quête ne
-   connaît que des types d'étapes génériques, donc ajouter une quête ne
-   demande aucune ligne de code.
-     frais  : prélevés au lancement (mise de départ, matériel consommé)
-     requis : objets d'inventaire obligatoires
-     arme   : true (n'importe laquelle) ou identifiant d'arme
-     veh    : 'perso' (un véhicule à soi), 'bateau', '4x4'
-     gain   : paie de la quête, avant le coefficient d'acte
+   LES VINGT-HUIT MISSIONS PRINCIPALES
+   Décrites en données ; le moteur ne connaît que des types d'étapes
+   génériques, donc ajouter une mission ne demande aucune ligne de code.
+     donneur    : personnage qui attend le joueur sur la carte
+     gain       : paie de la mission, avant le coefficient d'acte
+     temps      : chrono de la mission (chaque objectif rempli en redonne)
+     nuit       : la mission se joue de nuit — l'heure est avancée
+     tempete    : l'orage est forcé (acte V)
+     journal    : rappel d'une ligne affiché pendant la mission
+     recompense : { arme, veh, info } en plus de la paie
+     choix      : choix moral posé à la réussite
+   Les dix missions secondaires vivent dans SECONDAIRES, plus bas.
    ====================================================================== */
 const QUETES = [
-  /* ---------------------- ACTE I — LA RUE ---------------------- */
-  { n: 1, acte: 1, titre: 'Le rendez-vous', gain: 260,
-    intro: [S('rue', ['joueur'], null, 'Deux semaines dans cette ville et pas un billet. Un numéro griffonné sur un ticket de bus, c’est tout ce qu’il reste.'),
-            S('bar', ['recruteur'], 'RECRUTEUR', 'Le bar du port, ce soir. Viens à pied, ça t’apprendra la ville. Et ne fais pas attendre.')],
-    etapes: [{ t: 'aller', loc: 'bar', r: 70, txt: 'Rejoignez le bar du port à pied.' }],
-    outro: [S('bar', ['joueur', 'recruteur'], 'RECRUTEUR', 'Assieds-toi. Tu n’as rien, c’est parfait : les gens qui n’ont rien ne négocient pas.')] },
-  { n: 2, acte: 1, titre: 'Mise à l’épreuve', gain: 340,
-    intro: [S('rue', ['recruteur', 'joueur'], 'RECRUTEUR', 'Une mallette dans une voiture garée. Tu la prends, tu me la rapportes. Si tu te fais prendre, je ne te connais pas.')],
-    etapes: [{ t: 'objet', loc: 'auto', txt: 'Récupérez la mallette dans la voiture marquée.' },
-             { t: 'aller', loc: 'bar', r: 70, txt: 'Rapportez la mallette au bar.' }],
-    outro: [S('bar', ['joueur', 'recruteur'], 'RECRUTEUR', 'Tu n’as même pas regardé dedans. Bien. Les curieux coûtent cher.')] },
-  { n: 3, acte: 1, titre: 'Première paie', gain: 420, temps: 110,
-    intro: [S('rue', ['recruteur'], 'RECRUTEUR', 'Livraison. Le trafic est dense à cette heure, le client est pressé, et je déteste rembourser.')],
-    etapes: [{ t: 'aller', loc: 'ville', r: 70, txt: 'Livrez le colis avant la fin du chrono.' }],
-    outro: [S('rue', ['joueur'], null, 'Premier vrai billet. De quoi manger, pas de quoi vivre.')] },
-  { n: 4, acte: 1, titre: 'Le mauvais payeur', gain: 520,
-    intro: [S('rue', ['recruteur', 'joueur'], 'RECRUTEUR', 'Un type me doit de l’argent et court vite. Tu cours plus vite que lui, ou tu rentres à pied.')],
-    etapes: [{ t: 'tuer', loc: 'ville', nb: 2, txt: 'Rattrapez le mauvais payeur et ses gardes du corps.' },
-             { t: 'objet', loc: 'ici', txt: 'Récupérez la sacoche tombée.' }],
-    outro: [S('rue', ['joueur', 'recruteur'], 'RECRUTEUR', 'Il n’avait pas tout. Ils n’ont jamais tout. Garde ta part.')] },
-  { n: 5, acte: 1, titre: 'De quoi manger', gain: 900,
-    intro: [S('rue', ['recruteur'], 'RECRUTEUR', 'Une supérette, une caisse, une jauge : plus tu restes, plus tu prends, plus la police arrive. À toi de voir où tu t’arrêtes.'),
-            S('rue', ['joueur'], null, 'Avec ça, on s’achète une arme. Sans arme, les docks ne s’ouvriront jamais.')],
-    etapes: [{ t: 'braquer', loc: 'commerce', txt: 'Braquez la caisse du commerce marqué (R au comptoir).' }],
-    outro: [S('bar', ['joueur', 'recruteur'], 'RECRUTEUR', 'Achète une arme et une voiture. Au port, on ne discute pas avec les piétons désarmés.')] },
+  /* ---------------- ACTE I — BANLIEUE, « LE FEU » ---------------- */
+  { n: 1, acte: 1, titre: 'Le dernier client', donneur: 'paul', gain: 200, temps: 120,
+    journal: 'Livre la berline réparée chez Mme Lopez avant midi.',
+    intro: [S('garage', ['paul', 'joueur'], 'PAUL', 'Fiston, la berline de Mme Lopez est prête. Elle en a besoin avant midi. Conduis doucement, c’est pas une voiture de course.'),
+            S('garage', ['joueur'], 'LÉO', 'Doucement. Comme toujours.')],
+    etapes: [{ t: 'prendre', loc: 'garage', veh: 'berline', txt: 'Prenez la berline réparée devant le garage.' },
+             { t: 'livrer', loc: 'maison_lopez', r: 85, soin: true, txt: 'Livrez la berline chez Mme Lopez, sans l’abîmer.' }],
+    outro: [S('banlieue', ['lopez', 'joueur'], 'MME LOPEZ', 'Vous êtes un ange, Léo. Comme votre père.'),
+            S('garage', ['joueur'], null, 'En rentrant, un SUV noir est garé devant le garage. Personne au volant. Personne autour.')],
+    recompense: { info: 'Un SUV noir stationne devant le garage, vide.' } },
 
-  /* ---------------------- ACTE II — LES DOCKS ---------------------- */
-  { n: 6, acte: 2, titre: 'Marchandise sensible', gain: 1200, frais: 300, arme: true, veh: 'perso',
-    intro: [S('docks', ['recruteur', 'joueur'], 'RECRUTEUR', 'Les quais, cette nuit. Une caisse à sortir sans réveiller personne. Tu as une arme : garde-la dans ton dos.')],
-    etapes: [{ t: 'objet', loc: 'dock', txt: 'Récupérez la caisse sur le quai, de nuit.' },
-             { t: 'aller', loc: 'entrepot', r: 90, txt: 'Déposez la caisse à l’entrepôt.' }],
-    outro: [S('entrepot', ['joueur', 'recruteur'], 'RECRUTEUR', 'Propre. Le port te connaît maintenant. C’est un avantage et un problème.')] },
-  { n: 7, acte: 2, titre: 'Sortie en mer', gain: 1500, frais: 400, veh: 'bateau',
-    intro: [S('mer', ['passeur', 'joueur'], 'PASSEUR', 'Monte. Et si une vedette nous colle, tu ne regardes pas derrière : tu tiens la barre.')],
-    etapes: [{ t: 'bateau', loc: 'lac', r: 140, txt: 'Gagnez le point de rendez-vous en mer.' },
-             { t: 'fuir', loc: 'ici', d: 1200, txt: 'Semez la vedette : éloignez-vous de la zone.' }],
-    outro: [S('mer', ['passeur'], 'PASSEUR', 'Tu navigues mal mais tu navigues. Le lac se souviendra de toi.')] },
-  { n: 8, acte: 2, titre: 'Le concurrent', gain: 1800, frais: 500, arme: true,
-    intro: [S('entrepot', ['recruteur'], 'RECRUTEUR', 'Un concurrent a loué le même entrepôt que nous. Règle le bail.')],
-    etapes: [{ t: 'tuer', loc: 'entrepot', nb: 4, txt: 'Nettoyez l’entrepôt : quatre hommes armés.' }],
-    outro: [S('entrepot', ['joueur', 'recruteur'], 'RECRUTEUR', 'Le port n’aime pas le bruit. Il aime encore moins la concurrence.')] },
-  { n: 9, acte: 2, titre: 'Nettoyage', gain: 1700, frais: 600, temps: 150,
-    intro: [S('docks', ['recruteur'], 'RECRUTEUR', 'Il reste des traces de la nuit dernière. La police arrive dans dix minutes. Fais disparaître tout ça.')],
-    etapes: [{ t: 'objet', loc: 'dock', txt: 'Brûlez les premières preuves.' },
-             { t: 'objet', loc: 'dock', txt: 'Récupérez le second paquet de documents.' },
-             { t: 'aller', loc: 'entrepot', r: 90, txt: 'Mettez tout à l’abri avant l’arrivée de la police.' }],
-    outro: [S('docks', ['joueur'], null, 'Sirènes au bout du quai. Dix secondes de marge, pas plus.')] },
-  { n: 10, acte: 2, titre: 'Le docker', gain: 2100, frais: 700,
-    intro: [S('docks', ['docker', 'joueur'], 'DOCKER', 'Je ne parle pas aux gens comme vous. … Vous avez quoi, là, dans cette enveloppe ?')],
-    etapes: [{ t: 'aller', loc: 'dock', r: 90, txt: 'Suivez le docker sans vous faire voir.' },
-             { t: 'attendre', loc: 'ici', s: 12, r: 150, txt: 'Restez à portée : écoutez sa conversation.' },
-             { t: 'aller', loc: 'bar', r: 80, txt: 'Allez négocier son silence au bar.' }],
-    outro: [S('bar', ['docker', 'joueur'], 'DOCKER', 'Conteneur 47. C’est tout ce que je sais. Et je ne vous ai jamais vu.')] },
-  { n: 11, acte: 2, titre: 'Conteneur 47', gain: 2600, frais: 800, arme: true, temps: 200,
-    intro: [S('docks', ['recruteur', 'joueur'], 'RECRUTEUR', 'Des centaines de boîtes identiques et une équipe rivale qui cherche la même. Prends une lampe et de l’avance.')],
-    etapes: [{ t: 'objet', loc: 'dock', txt: 'Fouillez la première rangée de conteneurs.' },
-             { t: 'tuer', loc: 'ici', nb: 3, txt: 'L’équipe rivale vous a trouvé : réglez ça.' },
-             { t: 'objet', loc: 'dock', txt: 'Ouvrez le conteneur 47.' }],
-    outro: [S('docks', ['joueur', 'recruteur'], 'RECRUTEUR', 'Des costumes. Des invitations. Tu changes de quartier : achète-toi une tenue et une voiture présentable.')] },
+  { n: 2, acte: 1, titre: 'Fringale', donneur: 'toto', gain: 150, temps: 100,
+    journal: 'Conduis Toto et ses burgers au parc avant qu’ils refroidissent.',
+    intro: [S('garage', ['toto', 'joueur'], 'TOTO', 'Frérot, mon scooter est mort. RIP. J’ai dix burgers à livrer au parc et ils refroidissent. Un burger froid, c’est une tragédie.')],
+    etapes: [{ t: 'passager', qui: 'toto', loc: 'garage', dest: 'parc', r: 95, txt: 'Embarquez Toto et sa commande, direction le parc.' }],
+    outro: [S('parc', ['toto', 'joueur'], 'TOTO', 'Encore chauds ! Tiens, écoute ça : des types en costume rachètent tous les commerces du quartier. Tous, frérot.')],
+    recompense: { info: 'Des hommes en costume rachètent les commerces de la banlieue.' } },
 
-  /* ------------------- ACTE III — L’ARGENT PROPRE ------------------- */
-  { n: 12, acte: 3, titre: 'Costume et sourire', gain: 2800, frais: 900, requis: ['costume'], veh: 'perso',
-    intro: [S('reception', ['recruteur', 'joueur'], 'RECRUTEUR', 'Ce soir tu es invité. Souris, serre des mains, et ne touche à rien avant mon signal.')],
-    etapes: [{ t: 'aller', loc: 'banlieue', r: 70, txt: 'Entrez à la réception sans alerter la sécurité.' },
-             { t: 'attendre', loc: 'ici', s: 15, r: 170, txt: 'Mêlez-vous aux invités jusqu’au signal.' }],
-    outro: [S('reception', ['joueur', 'commanditaire'], 'COMMANDITAIRE', 'Vous êtes donc celui qu’on m’a décrit. Continuez de ne pas poser de questions.')] },
-  { n: 13, acte: 3, titre: 'Le commanditaire', gain: 3200, frais: 1000, requis: ['costume'],
-    intro: [S('reception', ['commanditaire'], 'COMMANDITAIRE', 'Je n’emploie pas des hommes : j’emploie des trajectoires. La vôtre m’intéresse.')],
-    etapes: [{ t: 'aller', loc: 'banlieue', r: 80, txt: 'Rejoignez la voiture du commanditaire.' },
-             { t: 'conduire', m: 900, txt: 'Conduisez-le où il vous l’indique, sans accrochage.' }],
-    outro: [S('villa', ['joueur', 'commanditaire'], 'COMMANDITAIRE', 'Vous n’avez pas demandé mon nom. C’est la seule qualité que j’exige.')] },
-  { n: 14, acte: 3, titre: 'Dossier compromettant', gain: 3600, frais: 1200, requis: ['crochet'], temps: 180,
-    intro: [S('villa', ['recruteur'], 'RECRUTEUR', 'Coffre dans la villa, propriétaires au théâtre. Le premier acte dure trois minutes de plus que toi.')],
-    etapes: [{ t: 'entrer', loc: 'villa', txt: 'Entrez dans la villa et crochetez le coffre.' },
-             { t: 'objet', loc: 'ici', txt: 'Prenez le dossier.' },
-             { t: 'fuir', loc: 'ici', d: 700, txt: 'Sortez avant le retour des propriétaires.' }],
-    outro: [S('villa', ['joueur'], null, 'Des photos, des noms, des chiffres. De quoi tenir une ville par le col.')] },
-  { n: 15, acte: 3, titre: 'Trahison en banlieue', gain: 4000, frais: 1300, veh: 'perso', temps: 160,
-    intro: [S('banlieue', ['recruteur', 'joueur'], 'RECRUTEUR', 'Quelqu’un a parlé. Il roule déjà. Les rues pavillonnaires sont étroites : ne le laisse pas atteindre la rocade.')],
-    etapes: [{ t: 'poursuite', loc: 'banlieue', txt: 'Rattrapez et arrêtez la voiture du traître.' }],
-    outro: [S('banlieue', ['joueur', 'traitre'], 'TRAÎTRE', 'Tu crois travailler pour un homme ? Tu travailles pour une adresse postale.')] },
-  { n: 16, acte: 3, titre: 'Le notaire', gain: 4400, frais: 1500, arme: true,
-    intro: [S('reception', ['notaire', 'joueur'], 'NOTAIRE', 'Je suis protégé, jeune homme. Par la loi, et par quatre hommes qui ne la lisent pas.')],
-    etapes: [{ t: 'tuer', loc: 'banlieue', nb: 4, txt: 'Écartez les gardes privés du notaire.' },
-             { t: 'objet', loc: 'ici', txt: 'Faites signer les actes.' }],
-    outro: [S('reception', ['notaire'], 'NOTAIRE', 'Tout est en ordre. Vous direz à votre employeur que je n’ai rien signé de contraint.')] },
-  { n: 17, acte: 3, titre: 'Blanchiment', gain: 5200, frais: 7000,
-    intro: [S('rue', ['recruteur', 'joueur'], 'RECRUTEUR', 'Tu vas acheter un commerce. Avec ton argent. Je te rembourse avec intérêts, et la ville voit un commerçant, pas un homme de main.')],
-    etapes: [{ t: 'commerce', txt: 'Rachetez un commerce en ville (entrez et payez sur place).' }],
-    outro: [S('rue', ['joueur', 'recruteur'], 'RECRUTEUR', 'Tu as maintenant une raison d’exister aux yeux des impôts. Et une caisse qui se remplit toute seule.')] },
+  { n: 3, acte: 1, titre: 'La pièce de la casse', donneur: 'paul', gain: 300, temps: 150,
+    journal: 'Récupère la boîte de vitesses chez Gégé, à la casse.',
+    intro: [S('garage', ['paul', 'joueur'], 'PAUL', 'Il me faut une boîte de vitesses. Gégé en a une à la casse. Dis-lui que c’est pour moi, il fera un prix.')],
+    etapes: [{ t: 'pnj', qui: 'gege', loc: 'casse', txt: 'Trouvez Gégé à la casse de la banlieue.' },
+             { t: 'objet', loc: 'ici', txt: 'Chargez la boîte de vitesses.' },
+             { t: 'aller', loc: 'garage', r: 90, txt: 'Rapportez la pièce au garage.' }],
+    outro: [S('casse', ['gege', 'joueur'], 'GÉGÉ', 'J’ai vendu, petit. À Horizon Immobilier. Tiens, regarde leur lettre : leur logo, c’est une vague.'),
+            S('casse', ['joueur'], 'LÉO', 'Une vague. Au bord d’un lac. Très drôle.')],
+    recompense: { info: 'Horizon Immobilier rachète la banlieue. Leur logo est une vague.' } },
 
-  /* --------------------- ACTE IV — LES TERRES --------------------- */
-  { n: 18, acte: 4, titre: 'Loin des caméras', gain: 5400, frais: 1800, requis: ['bidon'], veh: 'perso',
-    intro: [S('ferme', ['recruteur'], 'RECRUTEUR', 'Convoi par les petites routes. Aucune pompe sur cent kilomètres : si tu tombes en panne, tu finis à pied et moi sans marchandise.')],
-    etapes: [{ t: 'aller', loc: 'campagne', r: 90, txt: 'Suivez la route de campagne jusqu’au point de transfert.' },
-             { t: 'aller', loc: 'ferme', r: 100, txt: 'Livrez à la ferme indiquée.' }],
-    outro: [S('ferme', ['joueur'], null, 'Pas une caméra à des kilomètres. C’est reposant et c’est inquiétant.')] },
-  { n: 19, acte: 4, titre: 'La ferme', gain: 6000, frais: 2000, arme: true,
-    intro: [S('ferme', ['fermier', 'joueur'], 'FERMIER', 'Vous n’êtes pas d’ici. Dans la grange, il n’y a que du fourrage. … Ne regardez pas dans la grange.')],
-    etapes: [{ t: 'entrer', loc: 'ferme', txt: 'Entrez dans la grange : trouvez le laboratoire.' }],
-    choix: { q: 'Le laboratoire clandestin : que faites-vous ?',
-             a: ['Tout détruire (la police vous laisse tranquille)', 'Livrer au Recruteur (plus d’argent, plus d’ennemis)'],
-             effets: ['detruitLabo', 'livreLabo'] },
-    outro: [S('ferme', ['joueur', 'recruteur'], 'RECRUTEUR', 'Chaque choix se paie. Celui-là, tu le paieras plus tard.')] },
-  { n: 20, acte: 4, titre: 'L’île', gain: 6400, frais: 2200, veh: 'bateau',
-    intro: [S('ile', ['recruteur'], 'RECRUTEUR', 'La planque est sur l’île. De nuit, sous la pluie, personne ne regarde le lac.')],
-    etapes: [{ t: 'bateau', loc: 'ile', r: 160, txt: 'Atteignez l’île de nuit.' },
-             { t: 'objet', loc: 'ici', txt: 'Déposez le paquet dans la planque de l’île.' }],
-    outro: [S('ile', ['joueur'], null, 'Une cabane, un ponton, et la ville comme une ligne de lumières au loin.')] },
-  { n: 21, acte: 4, titre: 'Chasse à l’homme', gain: 7200, frais: 2400, arme: true,
-    intro: [S('ferme', ['recruteur', 'joueur'], 'RECRUTEUR', 'Ton nom circule. Tiens deux minutes en terrain ouvert avec toutes les patrouilles du comté sur le dos, et on en reparle.')],
-    etapes: [{ t: 'survivre', s: 120, etoiles: 5, txt: 'Survivez à cinq étoiles en terrain ouvert.' }],
-    outro: [S('ferme', ['joueur'], null, 'Les hélicoptères sont repartis. Les côtes font moins de bruit que la peur.')] },
-  { n: 22, acte: 4, titre: 'Le passeur', gain: 7600, frais: 2600, veh: 'bateau',
-    intro: [S('mer', ['passeur', 'joueur'], 'PASSEUR', 'Une patrouille nautique entre nous et la sortie. Tu passes devant, je passe derrière.')],
-    etapes: [{ t: 'bateau', loc: 'lac', r: 160, txt: 'Escortez le bateau du passeur à travers la patrouille.' },
-             { t: 'bateau', loc: 'dock', r: 150, txt: 'Ramenez-le au ponton.' }],
-    outro: [S('mer', ['passeur'], 'PASSEUR', 'Tu m’as coûté un moteur et sauvé cinq ans. On est quittes.')] },
-  { n: 23, acte: 4, titre: 'Les frères Vasseur', gain: 8200, frais: 2800, arme: true,
-    intro: [S('ferme', ['fermier', 'joueur'], 'FERMIER', 'Mon frère et moi on ne vend pas. On ne part pas. Et on a deux fusils chacun.')],
-    etapes: [{ t: 'aller', loc: 'ferme', r: 120, txt: 'Approchez de la ferme retranchée des Vasseur.' }],
-    choix: { q: 'Les frères Vasseur sont retranchés.',
-             a: ['Donner l’assaut (sanglant, rapide)', 'Négocier (moins d’argent, un allié)'],
-             effets: ['assautVasseur', 'negoVasseur'] },
-    outro: [S('ferme', ['joueur', 'recruteur'], 'RECRUTEUR', 'Les paysans sont les pires : ils n’ont nulle part où fuir, donc ils restent.')] },
-  { n: 24, acte: 4, titre: 'L’épave', gain: 9000, frais: 3000, requis: ['plongee'], veh: 'bateau',
-    intro: [S('mer', ['recruteur'], 'RECRUTEUR', 'Une épave, trente mètres de fond, une caisse scellée. L’eau est froide et la caisse est lourde.')],
-    etapes: [{ t: 'bateau', loc: 'lac', r: 150, txt: 'Gagnez le point de plongée.' },
-             { t: 'objet', loc: 'ici', txt: 'Plongez et remontez la caisse scellée.' }],
-    outro: [S('mer', ['joueur', 'recruteur'], 'RECRUTEUR', 'Des plans. Une usine. Tu vas avoir besoin de bien plus qu’un pistolet.')] },
+  { n: 4, acte: 1, titre: 'Au feu !', donneur: 'toto', gain: 0, temps: 90, nuit: true,
+    journal: 'Le garage brûle ! Fonce au garage Marchand.',
+    intro: [S('garage', ['toto'], 'TOTO', 'Léo ! LÉO ! Le garage brûle ! Y a de la fumée partout et une voiture noire qui démarre ! Viens vite !')],
+    etapes: [{ t: 'aller', loc: 'garage', r: 85, txt: 'Foncez au garage Marchand.' }],
+    outro: [S('incendie', ['joueur', 'paul'], 'LÉO', 'Papa ! Qu’est-ce qui se passe ?'),
+            S('incendie', ['paul', 'joueur'], 'PAUL', 'Reste calme, fiston. Je n’ai rien fait.'),
+            S('incendie', ['ines', 'paul'], 'INÈS', 'Paul Marchand est arrêté pour incendie volontaire et fraude à l’assurance.'),
+            S('incendie', ['joueur', 'ines'], 'LÉO', 'C’est n’importe quoi ! Ce garage, c’est toute sa vie !'),
+            S('incendie', ['ines'], 'INÈS', 'Les faits, Marchand. Seulement les faits. … Mais c’est bizarre : le feu est parti de deux endroits en même temps.'),
+            S('incendie', ['paul', 'joueur'], 'PAUL', 'Léo. Écoute le moteur. Il te dira ce qui cloche.'),
+            S('incendie', ['joueur'], null, 'La Comète n’est plus sous l’auvent. Il ne reste que deux traces de pneus et de la suie.')],
+    recompense: { info: 'Le feu a démarré à deux endroits en même temps : il est volontaire.' } },
 
-  /* --------------------- ACTE V — LA MACHINE --------------------- */
-  { n: 25, acte: 5, titre: 'L’usine', gain: 9500, frais: 3400, requis: ['lourd'], veh: 'perso',
-    intro: [S('usine', ['recruteur', 'joueur'], 'RECRUTEUR', 'Un dépôt d’armes déguisé en usine. Des passerelles, des angles morts, et des gens payés pour tirer d’abord.')],
-    etapes: [{ t: 'entrer', loc: 'usine', txt: 'Infiltrez le dépôt d’armes.' },
-             { t: 'tuer', loc: 'ici', nb: 5, txt: 'Dégagez le labyrinthe de passerelles.' }],
-    outro: [S('usine', ['joueur'], null, 'Des caisses jusqu’au plafond, toutes marquées du même sigle militaire.')] },
-  { n: 26, acte: 5, titre: 'Le convoi', gain: 10500, frais: 3600, requis: ['lourd', 'renfort'], veh: 'perso',
-    intro: [S('usine', ['recruteur'], 'RECRUTEUR', 'Un convoi militaire passe par la route de montagne basse. Tu l’arrêtes, tu prends ce qu’il y a, tu disparais.')],
-    etapes: [{ t: 'aller', loc: 'col', r: 200, txt: 'Interceptez le convoi sur la route du col.' },
-             { t: 'tuer', loc: 'ici', nb: 4, kind: 'soldat', txt: 'Neutralisez l’escorte.' },
-             { t: 'objet', loc: 'ici', txt: 'Videz le camion.' }],
-    outro: [S('montagne', ['joueur', 'recruteur'], 'RECRUTEUR', 'Tu vois cette route qui monte ? Un jour tu la prendras. Pas avec cette voiture.')] },
-  { n: 27, acte: 5, titre: 'Sabotage', gain: 11000, frais: 3800, requis: ['lourd'], temps: 210,
-    intro: [S('usine', ['recruteur'], 'RECRUTEUR', 'Fais sauter la chaîne de production. Et sors avant que les portes se verrouillent : elles se verrouillent toujours.')],
-    etapes: [{ t: 'entrer', loc: 'usine', txt: 'Entrez dans l’atelier de production.' },
-             { t: 'attendre', loc: 'ici', s: 18, r: 140, txt: 'Posez les charges : restez sur place.' },
-             { t: 'fuir', loc: 'ici', d: 900, txt: 'Sortez avant la mise à feu !' }],
-    outro: [S('usine', ['joueur'], null, 'La chaîne a brûlé pendant deux jours. Personne n’est venu l’éteindre.')] },
-  { n: 28, acte: 5, titre: 'L’informateur', gain: 12000, frais: 4000, requis: ['lourd', 'renfort'],
-    intro: [S('entrepot', ['recruteur', 'joueur'], 'RECRUTEUR', 'Un témoin change de camp. On le transfère ce soir. Trois équipes veulent qu’il n’arrive jamais.')],
-    etapes: [{ t: 'escorte', loc: 'ville', txt: 'Escortez le témoin jusqu’au point de transfert.' }],
-    outro: [S('rue', ['joueur', 'recruteur'], 'RECRUTEUR', 'Il a parlé. Et ce qu’il a dit te concerne.')] },
-  { n: 29, acte: 5, titre: 'Le vrai nom', gain: 13000, frais: 4200,
-    intro: [S('reception', ['commanditaire', 'joueur'], 'COMMANDITAIRE', 'Vous vouliez un nom. Le mien est sur la moitié des permis de cette ville. Et sur votre dossier d’adoption.'),
-            S('reception', ['recruteur'], 'RECRUTEUR', 'Tu n’as pas été recruté dans la rue par hasard. On t’a choisi avant que tu arrives.')],
-    etapes: [{ t: 'aller', loc: 'villa', r: 90, txt: 'Rejoignez la villa du commanditaire.' },
-             { t: 'attendre', loc: 'ici', s: 14, r: 160, txt: 'Écoutez jusqu’au bout.' }],
-    outro: [S('villa', ['joueur'], null, 'Quinze ans de hasard viennent de se transformer en plan. Le vôtre n’existe pas encore.')] },
-  { n: 30, acte: 5, titre: 'Rupture', gain: 14000, frais: 4400, arme: true,
-    intro: [S('rue', ['recruteur', 'joueur'], 'RECRUTEUR', 'Le réseau te lâche. Tes planques sont grillées, tes comptes gelés. Il te reste une porte et un nom à régler.')],
-    etapes: [{ t: 'tuer', loc: 'ville', nb: 5, txt: 'Survivez à l’équipe envoyée pour vous.' },
-             { t: 'aller', loc: 'planque', r: 90, txt: 'Rejoignez la seule planque encore sûre.' }],
-    outro: [S('montagne', ['joueur'], null, 'Il reste une direction où personne ne monte : le nord. Il va falloir s’équiper. Vraiment s’équiper.')] },
+  { n: 5, acte: 1, titre: 'Le SUV noir', donneur: 'toto', gain: 0, temps: 150, nuit: true,
+    journal: 'Retrouve le SUV noir parti vers la ville avec la Comète.',
+    intro: [S('rue', ['toto', 'joueur'], 'TOTO', 'Je l’ai vu ! Le SUV noir avait la Comète en remorque. Il est parti vers la ville. Prends mon scooter… ah non, il est mort. Prends n’importe quoi !')],
+    etapes: [{ t: 'aller', loc: 'parking', r: 95, txt: 'Fouillez le parking abandonné, entre la banlieue et la ville.' },
+             { t: 'objet', loc: 'ici', txt: 'Ouvrez la boîte à gants du SUV.' }],
+    outro: [S('rue', ['joueur'], null, 'Le SUV est vide, la Comète n’est plus là. Dans la boîte à gants : un ticket du club Le Néon et la carte d’un certain Marco Vidal.')],
+    recompense: { info: 'Un ticket du club Le Néon et la carte de Marco Vidal.' } },
 
-  /* -------------------- ACTE VI — LA MONTAGNE -------------------- */
-  { n: 31, acte: 6, titre: 'Le col', gain: 16000, frais: 4600, requis: ['tenue', 'pneus'], veh: 'perso',
-    intro: [S('montagne', ['guide', 'joueur'], 'GUIDE', 'Au-dessus du col, le froid ne prévient pas et la route ne pardonne pas. Tenue, chaînes, et tu roules lentement.')],
-    etapes: [{ t: 'aller', loc: 'col', r: 160, txt: 'Franchissez le col et prenez les lacets.' },
-             { t: 'aller', loc: 'refuge', r: 130, txt: 'Atteignez le premier refuge.' }],
-    outro: [S('montagne', ['joueur', 'guide'], 'GUIDE', 'Tu es passé. Beaucoup de gens sont au fond des ravins pour avoir cru que c’était facile.')] },
-  { n: 32, acte: 6, titre: 'Le refuge', gain: 17000, frais: 4800, requis: ['tenue'], temps: 260,
-    intro: [S('blizzard', ['blesse', 'joueur'], 'BLESSÉ', 'Ma jambe… je ne tiendrai pas la nuit. Le refuge est à une heure. Moins, si vous me portez.')],
-    etapes: [{ t: 'escorte', loc: 'refuge', lent: true, txt: 'Menez le blessé au refuge avant la nuit.' }],
-    outro: [S('montagne', ['blesse'], 'BLESSÉ', 'Vous auriez pu me laisser. La montagne l’aurait fait pour vous.')] },
-  { n: 33, acte: 6, titre: 'La mine', gain: 18000, frais: 5000, requis: ['tenue', 'lampe'],
-    intro: [S('mine', ['guide', 'joueur'], 'GUIDE', 'Sans lampe frontale, tu avances dix mètres et tu tournes en rond jusqu’à la mort. Avec, tu vois ce qu’ils ont caché.')],
-    etapes: [{ t: 'entrer', loc: 'mine', txt: 'Descendez dans la mine désaffectée.' },
-             { t: 'objet', loc: 'mine', txt: 'Trouvez la cache au fond de la galerie.' }],
-    outro: [S('mine', ['joueur'], null, 'Des armes sous bâche, intactes depuis vingt ans. Quelqu’un les a mises là pour un jour comme celui-ci.')] },
-  { n: 34, acte: 6, titre: 'Le barrage', gain: 20000, frais: 5400, requis: ['tenue', 'pneus'], arme: true,
-    intro: [S('barrage', ['recruteur'], 'RECRUTEUR', 'Coupe le courant de la vallée. Sans électricité, les caméras de la base en bas deviennent des boîtes vides.')],
-    etapes: [{ t: 'aller', loc: 'barrage', r: 170, txt: 'Infiltrez le barrage hydroélectrique.' },
-             { t: 'tuer', loc: 'ici', nb: 4, txt: 'Neutralisez les gardes du poste de commande.' },
-             { t: 'attendre', loc: 'ici', s: 16, r: 150, txt: 'Coupez le courant de la vallée.' }],
-    outro: [S('barrage', ['joueur'], null, 'La vallée s’est éteinte d’un coup. Du barrage, on voit la base militaire comme un trou noir.')] },
-  { n: 35, acte: 6, titre: 'La station fantôme', gain: 22000, frais: 5800, requis: ['tenue', 'lampe'], veh: '4x4',
-    intro: [S('station', ['guide', 'joueur'], 'GUIDE', 'La station a fermé en une nuit, il y a trente ans. Et par blizzard, tu ne verras pas ta main devant tes yeux.')],
-    etapes: [{ t: 'aller', loc: 'station', r: 200, txt: 'Fouillez la station de ski abandonnée.' },
-             { t: 'objet', loc: 'station', txt: 'Trouvez ce qui est resté dans la gare du téléphérique.' }],
-    outro: [S('station', ['joueur'], null, 'Un 4x4 blindé dans un garage effondré, plein à ras bord. Quelqu’un comptait partir et n’est jamais revenu.')] },
-  { n: 36, acte: 6, titre: 'Face nord', gain: 24000, frais: 6200, requis: ['tenue', 'corde'],
-    intro: [S('montagne', ['guide'], 'GUIDE', 'Aucun véhicule ne monte là. Corde, piolet, et tu ne regardes pas en bas.')],
-    etapes: [{ t: 'aller', loc: 'paroi', r: 110, txt: 'Rejoignez le pied de la face nord.' },
-             { t: 'paroi', txt: 'Franchissez la paroi à la corde (F).' },
-             { t: 'objet', loc: 'ici', txt: 'Récupérez le matériel en haut.' }],
-    outro: [S('crete', ['joueur'], null, 'De là-haut, on voit la mer, la ville, et la piste de la base. Tout tient dans un seul regard.')] },
-  { n: 37, acte: 6, titre: 'L’avalanche', gain: 26000, frais: 6600, requis: ['tenue', 'pneus'], veh: '4x4', temps: 150,
-    intro: [S('blizzard', ['guide', 'joueur'], 'GUIDE', 'L’explosion va décrocher toute la face. Tu descends les lacets à fond et tu ne freines pas. Surtout, tu ne freines pas.')],
-    etapes: [{ t: 'fuir', loc: 'ici', d: 2200, txt: 'Fuyez l’avalanche : descendez les lacets !' },
-             { t: 'aller', loc: 'col', r: 220, txt: 'Atteignez le col avant la coulée.' }],
-    outro: [S('montagne', ['joueur', 'guide'], 'GUIDE', 'La route a disparu derrière toi. Personne ne remontera par là avant le printemps.')] },
-  { n: 38, acte: 6, titre: 'Le dernier homme', gain: 30000, frais: 7000, requis: ['tenue'], arme: true,
-    intro: [S('refuge', ['traitre', 'joueur'], 'TRAÎTRE', 'Je savais que tu monterais. C’est pour ça que j’ai choisi le plus haut refuge : ici, il n’y a pas de témoins.')],
-    etapes: [{ t: 'aller', loc: 'refuge', r: 130, txt: 'Rejoignez le refuge le plus haut.' },
-             { t: 'tuer', loc: 'ici', nb: 3, txt: 'Écartez ses hommes.' }],
-    choix: { q: 'Celui qui vous a vendu est à terre.',
-             a: ['L’exécuter (vous ne serez plus trahi)', 'L’épargner (il parlera, et vous devrez vivre avec)'],
-             effets: ['executeTraitre', 'epargneTraitre'] },
-    outro: [S('crete', ['joueur'], null, 'Reste la base, en bas, et la piste. Et un avion qui attend depuis le premier jour.')] },
+  { n: 6, acte: 1, titre: 'Le parloir', donneur: 'ines', gain: 0, temps: 120,
+    journal: 'Rends visite à ton père au commissariat de la banlieue.',
+    intro: [S('parloir', ['ines', 'joueur'], 'INÈS', 'Ton père a droit à une visite. Dix minutes. Pas une de plus. Et ne me fais pas perdre mon temps.')],
+    etapes: [{ t: 'aller', loc: 'commissariat', r: 85, txt: 'Présentez-vous au commissariat de la banlieue.' },
+             { t: 'attendre', loc: 'ici', s: 10, r: 120, txt: 'Dix minutes de parloir : restez sur place.' }],
+    outro: [S('parloir', ['paul', 'joueur'], 'PAUL', 'Tu as une tête de pneu crevé.'),
+            S('parloir', ['joueur', 'paul'], 'LÉO', 'Ils disent que tu as brûlé le garage pour l’argent de l’assurance.'),
+            S('parloir', ['paul', 'joueur'], 'PAUL', 'Il y a deux semaines, des hommes sont venus. Horizon Immobilier. Ils voulaient acheter. J’ai dit non.'),
+            S('parloir', ['joueur', 'paul'], 'LÉO', 'Pourquoi tu ne m’as rien dit ?'),
+            S('parloir', ['paul'], 'PAUL', 'Pour que tu ne fasses pas ce que tu vas faire maintenant.'),
+            S('parloir', ['joueur', 'paul'], 'LÉO', 'Je vais te sortir de là.'),
+            S('parloir', ['paul'], 'PAUL', 'Alors fais-le proprement. On ne répare pas tout avec un marteau.')],
+    recompense: { info: 'Paul a refusé de vendre le garage à Horizon Immobilier.' } },
 
-  /* ----------------------- ACTE VII — FINAL ----------------------- */
-  { n: 39, acte: 7, titre: 'Par les crêtes', gain: 40000, frais: 9000, requis: ['infil', 'tenue', 'corde'],
-    intro: [S('crete', ['recruteur', 'joueur'], 'RECRUTEUR', 'L’entrée principale est une boucherie. Par les crêtes, tu arrives dans leur dos, de nuit, sans un bruit.')],
-    etapes: [{ t: 'aller', loc: 'crete', r: 220, txt: 'Prenez la route des crêtes vers le sud.' },
-             { t: 'aller', loc: 'base', r: 200, txt: 'Atteignez la base militaire par l’arrière, de nuit.' }],
-    outro: [S('crete', ['joueur'], null, 'Pas une alarme. Les projecteurs balaient l’entrée principale, à deux kilomètres de là.')] },
-  { n: 40, acte: 7, titre: 'Point de non-retour', gain: 80000, frais: 12000, requis: ['infil'], arme: true,
-    intro: [S('piste', ['recruteur', 'joueur'], 'RECRUTEUR', 'L’avion est au bout de la piste, plein fait. Après le décollage, plus personne ne te doit rien. Et tu ne dois plus rien à personne.')],
-    etapes: [{ t: 'aller', loc: 'avion', r: 160, txt: 'Atteignez l’avion au bout de la piste.' },
-             { t: 'decoller', txt: 'Décollez sous le feu.' }],
-    choix: { q: 'L’avion a quitté le sol. Et maintenant ?',
-             a: ['Partir et tout laisser derrière vous', 'Revenir régler les comptes'],
-             effets: ['finPart', 'finRevient'] },
-    outro: [S('piste', ['joueur'], null, 'La ville tient dans le hublot. Elle a toujours tenu dans quelque chose de plus petit que vous.')] }
+  /* ------------- ACTE II — VILLE, « LES GENS D’EN HAUT » ------------- */
+  { n: 7, acte: 2, titre: 'Champion', donneur: 'marco', gain: 0, temps: 150, nuit: true,
+    journal: 'Rejoins Marco Vidal au club Le Néon.',
+    intro: [S('rue', ['joueur'], null, 'Le téléphone sonne. Un numéro inconnu, et une voix qui sourit en parlant.'),
+            S('club', ['marco'], 'MARCO', 'Allô ? Tu as trouvé ma carte ? Alors c’est ton jour de chance, champion. Viens au Néon, on va parler affaires.')],
+    etapes: [{ t: 'pnj', qui: 'marco', loc: 'club', txt: 'Rejoignez Marco au club Le Néon.' }],
+    outro: [S('club', ['marco', 'joueur'], 'MARCO', 'Ce SUV, c’est les Corbeaux. Une bande qui fait les sales boulots de gens très propres.'),
+            S('club', ['joueur'], null, 'Il se dit fauché depuis dix minutes. Il porte une montre en or qui n’a pas une rayure.')],
+    recompense: { info: 'Le SUV noir appartient aux Corbeaux. Marco porte une montre en or neuve.' } },
+
+  { n: 8, acte: 2, titre: 'Le chauffeur', donneur: 'marco', gain: 600, temps: 140, nuit: true,
+    journal: 'Conduis le Corbeau de l’hôtel au parking sans abîmer la voiture.',
+    intro: [S('club', ['marco', 'joueur'], 'MARCO', 'Les Corbeaux cherchent un chauffeur pour ce soir. Toi, tu conduis comme un pilote. Tu les promènes, tu ouvres grand les oreilles. Simple.')],
+    etapes: [{ t: 'passager', qui: 'corbeau', loc: 'hotel', dest: 'parking', r: 95, soin: true, txt: 'Prenez le Corbeau à l’hôtel et menez-le au parking à étages.' }],
+    outro: [S('rue', ['corbeau', 'joueur'], 'LE CORBEAU', 'Ce soir, le patron voit le client sur le toit du parking. Tu répètes ça à personne, chauffeur.')],
+    recompense: { info: 'Kessler rencontre « le client » ce soir, sur le toit d’un parking.' } },
+
+  { n: 9, acte: 2, titre: 'Sur le toit', donneur: 'marco', gain: 0, temps: 120, nuit: true,
+    journal: 'Monte sur le toit voisin et observe le rendez-vous de Kessler.',
+    intro: [S('rue', ['marco', 'joueur'], 'MARCO', 'Le rendez-vous est dans deux minutes. Monte sur le toit d’en face et regarde. Juste regarder, hein. Pas de héros.')],
+    etapes: [{ t: 'aller', loc: 'toit', r: 85, txt: 'Gagnez le toit du parking voisin.' },
+             { t: 'attendre', loc: 'ici', s: 14, r: 150, txt: 'Observez la rencontre sans bouger.' }],
+    outro: [S('rue', ['joueur'], null, 'Kessler reçoit une enveloppe d’un homme en costume. Vous prenez la photo. Sur son badge : Delorme Horizon.'),
+            S('rue', ['marco', 'joueur'], 'MARCO', 'Alors, champion ? Tu vois qui ?'),
+            S('rue', ['joueur', 'marco'], 'LÉO', 'Kessler. Et un type en costume avec une enveloppe.'),
+            S('rue', ['marco'], 'MARCO', 'Si c’est quelqu’un d’Horizon, on est mal. Très mal.'),
+            S('rue', ['joueur', 'marco'], 'LÉO', 'J’ai jamais dit Horizon.'),
+            S('rue', ['marco'], 'MARCO', '… Tout le monde parle d’Horizon, en ville. C’est comme la météo, champion.')],
+    recompense: { info: 'L’homme à l’enveloppe porte un badge Delorme Horizon.' } },
+
+  { n: 10, acte: 2, titre: 'Les faits', donneur: 'ines', gain: 0, temps: 120,
+    journal: 'Retrouve Inès dans la ruelle derrière le commissariat central.',
+    intro: [S('rue', ['ines'], 'INÈS', 'Une photo d’une enveloppe ? Ça ne prouve rien. Retrouve-moi derrière le commissariat central. Pas devant. Derrière.')],
+    etapes: [{ t: 'pnj', qui: 'ines', loc: 'ruelle', txt: 'Rejoignez Inès dans la ruelle, derrière le commissariat central.' }],
+    outro: [S('rue', ['ines', 'joueur'], 'INÈS', 'Je t’aide. En secret, et sans mon chef. Apporte-moi le carnet où les Corbeaux notent qui les paie.'),
+            S('rue', ['joueur', 'ines'], 'LÉO', 'Et si je me fais prendre ?'),
+            S('rue', ['ines'], 'INÈS', 'Alors je ne t’ai jamais parlé.')],
+    recompense: { info: 'Il faut le carnet de comptes des Corbeaux.' } },
+
+  { n: 11, acte: 2, titre: 'Le carnet des Corbeaux', donneur: 'marco', gain: 800, temps: 180, nuit: true,
+    journal: 'Vole le carnet des Corbeaux, puis sème leurs voitures.',
+    intro: [S('entrepot', ['marco', 'joueur'], 'MARCO', 'Leur atelier est dans la zone industrielle. Ce soir, ils sont tous au Néon. Tu entres, tu prends le carnet, tu sors. Et tu cours. Beaucoup.')],
+    etapes: [{ t: 'aller', loc: 'atelier', r: 90, txt: 'Approchez de l’atelier des Corbeaux.' },
+             { t: 'objet', loc: 'ici', txt: 'Prenez le carnet de comptes.' },
+             { t: 'tuer', loc: 'ici', nb: 3, txt: 'Ils ne sont pas tous au Néon : dégagez le passage.' },
+             { t: 'fuir', loc: 'ici', d: 950, txt: 'Semez leurs voitures et filez à la planque de Marco.' }],
+    outro: [S('entrepot', ['joueur'], null, 'Une ligne au milieu des autres, écrite au stylo bille : « Garage Marchand. 10 000 $. Payé par D.H. »')],
+    recompense: { arme: 'pistol', info: 'Carnet des Corbeaux : « Garage Marchand. 10 000 $. Payé par D.H. »' } },
+
+  { n: 12, acte: 2, titre: 'La tour Horizon', donneur: 'ines', gain: 0, temps: 150,
+    journal: 'Va à ton entretien d’embauche à la tour Delorme Horizon.',
+    intro: [S('rue', ['ines', 'joueur'], 'INÈS', 'D.H., c’est Delorme Horizon. Je ne peux pas entrer chez eux sans mandat. Toi, tu peux : ils recrutent des chauffeurs. Va à l’entretien.')],
+    etapes: [{ t: 'aller', loc: 'tour', r: 85, txt: 'Présentez-vous à l’entretien, à la tour Delorme Horizon.' },
+             { t: 'attendre', loc: 'ici', s: 15, r: 140, txt: 'Tenez votre rôle jusqu’au bout de l’entretien.' }],
+    outro: [S('bureau', ['delorme', 'joueur'], 'DELORME', 'Monsieur Marchand. Asseyez-vous. Je connais votre nom, bien sûr. Une triste histoire, ce garage.'),
+            S('bureau', ['joueur', 'delorme'], 'LÉO', 'Vous savez très bien ce qui s’est passé.'),
+            S('bureau', ['delorme'], 'DELORME', 'Je sais que votre père a besoin d’un très bon avocat. Je peux le payer. En échange, vous me vendez le terrain.'),
+            S('bureau', ['joueur', 'delorme'], 'LÉO', 'Il n’est pas à vendre.'),
+            S('bureau', ['delorme'], 'DELORME', 'Tout est à vendre, mon jeune ami. Le reste est une question de prix.'),
+            S('bureau', ['joueur', 'delorme'], 'LÉO', 'C’est qui, sur la photo ? La ferme sous l’eau ?'),
+            S('bureau', ['delorme'], 'DELORME', '… Une vieille histoire. Les vieilles histoires nous apprennent à ne plus jamais perdre. Bonne journée, monsieur Marchand.'),
+            S('bureau', ['joueur'], null, 'Sur le bureau, une carte de la campagne. Des fermes entourées en rouge, une par une.')],
+    recompense: { info: 'Delorme entoure en rouge les fermes de la campagne sur une carte.' } },
+
+  /* ---------------- ACTE III — CAMPAGNE, « LA TERRE » ---------------- */
+  { n: 13, acte: 3, titre: 'La dernière fermière', donneur: 'toto', gain: 0, temps: 200,
+    journal: 'Rends visite à Mamie Jo, à la ferme Aubry.',
+    intro: [S('parc', ['toto', 'joueur'], 'TOTO', 'La ferme entourée en rouge, c’est celle de Mamie Jo ! Elle vendait des œufs à ma grand-mère. Des œufs énormes, frérot. Va la voir, elle est peut-être en danger.')],
+    etapes: [{ t: 'pnj', qui: 'mamiejo', loc: 'ferme_aubry', txt: 'Gagnez la ferme Aubry, au fond de la campagne.' }],
+    outro: [S('ferme', ['mamiejo', 'joueur'], 'MAMIE JO', 'Deux costards dans ma cour. Ils sont repartis vite en voyant le fusil. Entre, le gamin, je fais du café. Du vrai.'),
+            S('ferme', ['joueur'], 'LÉO', 'Le vrai, c’est celui qui tient la cuillère debout ?'),
+            S('ferme', ['mamiejo'], 'MAMIE JO', 'J’ai enterré deux maris et trois tracteurs. C’est pas un costard qui va me faire peur.')],
+    recompense: { info: 'Mamie Jo Aubry est la dernière à refuser de vendre.' } },
+
+  { n: 14, acte: 3, titre: 'Le camion de boue', donneur: 'mamiejo', gain: 500, temps: 180,
+    journal: 'Suis le camion-citerne d’Horizon, de loin, jusqu’à sa destination.',
+    intro: [S('ferme', ['mamiejo', 'joueur'], 'MAMIE JO', 'Depuis que leurs camions passent, l’eau de nos puits est marron. Suis-en un, le gamin. Mais de loin. Un renard ne court pas derrière la poule en chantant.')],
+    etapes: [{ t: 'suivre', loc: 'clairiere', txt: 'Suivez le camion-citerne sans vous faire repérer.' },
+             { t: 'objet', loc: 'ici', txt: 'Photographiez le déversement.' }],
+    outro: [S('clairiere', ['joueur'], null, 'Le camion vide sa boue dans la rivière, tranquillement, comme on vide un seau.'),
+            S('clairiere', ['joueur'], null, 'Le téléphone sonne : Marco, qui veut savoir où vous êtes. Deux minutes plus tard, une voiture d’Horizon entre dans la clairière.')],
+    recompense: { info: 'Horizon salit l’eau des puits en vidant sa boue dans la rivière.' } },
+
+  { n: 15, acte: 3, titre: 'Les géomètres', donneur: 'marco', gain: 400, temps: 150, nuit: true,
+    journal: 'Vole le plan des géomètres au camp près du barrage.',
+    intro: [S('rue', ['marco', 'joueur'], 'MARCO', 'Champion, Horizon a un camp de géomètres près du barrage. Leurs plans, ça vaut de l’or. Toi, tu entres. Moi, je fais le guet.')],
+    etapes: [{ t: 'aller', loc: 'camp', r: 95, txt: 'Approchez du camp des géomètres, près du barrage.' },
+             { t: 'objet', loc: 'ici', txt: 'Volez le plan de mesures.' },
+             { t: 'fuir', loc: 'ici', d: 750, txt: 'Quittez le camp avant que l’alerte soit donnée.' }],
+    outro: [S('camp', ['joueur'], null, 'Le plan mesure le niveau de l’eau. Pas ici : dans la banlieue basse. Rue par rue.'),
+            S('camp', ['marco'], 'MARCO', 'Oui, monsieur. Il ne sait rien.'),
+            S('camp', ['joueur'], 'LÉO', '… Il ne sait rien.')],
+    recompense: { info: 'Horizon mesure le niveau de l’eau dans la banlieue basse. Marco parle à « monsieur ».' } },
+
+  { n: 16, acte: 3, titre: 'La veillée', donneur: 'mamiejo', gain: 0, temps: 160,
+    journal: 'Conduis Mamie Jo jusqu’aux ruines du vieux moulin, au bord du lac.',
+    intro: [S('ferme', ['mamiejo', 'joueur'], 'MAMIE JO', 'Emmène-moi au vieux moulin, au bord du lac. J’ai une histoire à te raconter. Une histoire comme ça, ça ne se raconte pas dans une cuisine.')],
+    etapes: [{ t: 'passager', qui: 'mamiejo', loc: 'ferme_aubry', dest: 'moulin', r: 105, txt: 'Conduisez Mamie Jo aux ruines du vieux moulin.' }],
+    outro: [S('moulin', ['mamiejo', 'joueur'], 'MAMIE JO', 'En 1979, il a plu pendant dix jours. Le vieux barrage a lâché un peu. Juste un peu. Assez pour tout noyer ici.'),
+            S('moulin', ['joueur', 'mamiejo'], 'LÉO', 'La ville n’a pas envoyé les secours ?'),
+            S('moulin', ['mamiejo'], 'MAMIE JO', 'Si. Aux beaux quartiers d’abord. Nous, on a attendu trois jours sur nos toits.'),
+            S('moulin', ['joueur', 'mamiejo'], 'LÉO', 'Et Delorme, dans tout ça ?'),
+            S('moulin', ['mamiejo'], 'MAMIE JO', 'Le petit Victor habitait la ferme d’à côté. Il a tout perdu. Sa maison, ses bêtes. Son père ne s’en est jamais remis.'),
+            S('moulin', ['joueur', 'mamiejo'], 'LÉO', 'Alors il devrait détester ce qu’il est en train de faire.'),
+            S('moulin', ['mamiejo'], 'MAMIE JO', 'Le chagrin, le gamin, c’est comme l’eau. Si tu ne le laisses pas couler, il déborde ailleurs.')],
+    recompense: { info: 'Delorme a perdu la ferme de sa famille dans l’inondation de 1979.' } },
+
+  { n: 17, acte: 3, titre: 'La caisse noire', donneur: 'mamiejo', gain: 0, temps: 180, nuit: true,
+    journal: 'Arrête le fourgon d’Horizon et ramène-le à la grange.',
+    intro: [S('grange', ['mamiejo', 'joueur'], 'MAMIE JO', 'Cette nuit, un fourgon d’Horizon passe avec l’argent pour acheter nos dernières fermes. Pas de fourgon, pas de ventes. Tu sais conduire, le gamin. Moi, je sais viser les pneus.')],
+    etapes: [{ t: 'intercepter', loc: 'route_barrage', veh: 'fourgon', txt: 'Arrêtez le fourgon blindé sur la route de campagne.' },
+             { t: 'tuer', loc: 'ici', nb: 3, txt: 'Les gardes descendent : tenez la route.' },
+             { t: 'livrer', loc: 'grange', r: 105, txt: 'Ramenez le fourgon à la grange de Mamie Jo.' }],
+    outro: [S('grange', ['mamiejo', 'joueur'], 'MAMIE JO', 'Vingt mille. Avec ça, aucune famille d’ici n’aura besoin de vendre.'),
+            S('grange', ['joueur', 'mamiejo'], 'LÉO', 'Avec ça, mon père peut avoir le meilleur avocat de la ville.'),
+            S('grange', ['mamiejo'], 'MAMIE JO', 'Je ne vais pas te dire quoi faire. C’est ton père.'),
+            S('grange', ['joueur'], 'LÉO', '… Et c’est votre terre.'),
+            S('grange', ['mamiejo'], 'MAMIE JO', 'Choisis, le gamin. Mais choisis une fois, et pour de bon.')],
+    choix: { q: 'Les 20 000 $ du fourgon sont dans la grange.',
+             a: ['Rendre l’argent aux fermiers — Mamie Jo vous laisse son pick-up',
+                 'Garder l’argent pour l’avocat de Paul — + 20 000 $'],
+             effets: ['rendreArgent', 'garderArgent'] },
+    recompense: { info: 'Le fourgon des achats d’Horizon est arrêté. Marco connaissait l’heure exacte.' } },
+
+  /* ------------- ACTE IV — LAC ET PORT, « LES QUAIS » ------------- */
+  { n: 18, acte: 4, titre: 'Le vieux capitaine', donneur: 'ines', gain: 0, temps: 150,
+    journal: 'Va parler au capitaine Okafor, à la capitainerie du port.',
+    intro: [S('docks', ['ines', 'joueur'], 'INÈS', 'Mon contact au port, le capitaine Okafor, a vu passer des camions d’Horizon. Il ne parle qu’aux gens qu’il aime bien. Alors sois poli. Pour une fois.')],
+    etapes: [{ t: 'pnj', qui: 'okafor', loc: 'capitainerie', txt: 'Allez parler au capitaine Okafor, à la capitainerie.' }],
+    outro: [S('capitainerie', ['okafor', 'joueur'], 'OKAFOR', 'Des caisses. « Explosifs de chantier ». Entrepôt 7. … La mer rend toujours ce qu’on lui cache. Toujours.'),
+            S('capitainerie', ['okafor'], 'OKAFOR', 'Et une voiture bleue, sous une bâche, sur le quai des conteneurs. … Elle t’attend, je crois.')],
+    recompense: { info: 'Des explosifs entrent dans l’entrepôt 7. La Comète est sur le quai des conteneurs.' } },
+
+  { n: 19, acte: 4, titre: 'La Comète', donneur: 'toto', gain: 0, temps: 180, nuit: true,
+    journal: 'Récupère la Comète et cache-la dans le hangar à bateaux.',
+    intro: [S('docks', ['toto', 'joueur'], 'TOTO', 'Frérot. La voiture bleue sous la bâche. C’est ELLE. Je l’ai vue de mes yeux ! Bon, avec des jumelles. Mais de mes yeux quand même !')],
+    etapes: [{ t: 'prendre', loc: 'quai_conteneurs', veh: 'la_comete', txt: 'Dégagez la bâche : la Comète est sur le quai des conteneurs.' },
+             { t: 'livrer', loc: 'hangar_bateaux', r: 105, soin: true, txt: 'Mettez la Comète à l’abri dans le hangar à bateaux.' }],
+    outro: [S('hangarb', ['toto', 'joueur'], 'TOTO', 'Elle est encore plus belle que dans mes souvenirs. Je crois que je vais pleurer. Ou manger. Les deux.'),
+            S('hangarb', ['joueur', 'toto'], 'LÉO', 'Il y a une rayure sur la portière.'),
+            S('hangarb', ['toto'], 'TOTO', 'Frérot, on a volé une voiture à des criminels, et toi tu regardes les rayures ?'),
+            S('hangarb', ['joueur'], 'LÉO', 'Mon père la verra. Il la regardera aussi.')],
+    recompense: { veh: 'la_comete', info: 'La Comète est récupérée et remise en route.' } },
+
+  { n: 20, acte: 4, titre: 'L’entrepôt 7', donneur: 'marco', gain: 0, temps: 150, nuit: true,
+    journal: 'Rejoins Marco à l’entrepôt 7 du port.',
+    intro: [S('marina', ['marco'], 'MARCO', 'Champion, j’ai le code de l’entrepôt 7. Ce soir, il est vide, je te le jure. Vas-y, je te rejoins là-bas.')],
+    etapes: [{ t: 'aller', loc: 'entrepot7', r: 90, txt: 'Entrez dans l’entrepôt 7.' },
+             { t: 'tuer', loc: 'ici', nb: 4, txt: 'C’était un piège : ouvrez-vous un passage.' },
+             { t: 'fuir', loc: 'ici', d: 1100, txt: 'Sortez du port.' }],
+    outro: [S('entrepot', ['joueur'], 'HAUT-PARLEUR', 'Bonsoir, monsieur Marchand. Vous êtes très prévisible. Comme votre père.'),
+            S('entrepot', ['joueur'], 'LÉO', 'Marco ? Marco, t’es où ?'),
+            S('entrepot', ['joueur'], 'HAUT-PARLEUR', '… Désolé, champion. Vraiment.'),
+            S('entrepot', ['kessler', 'joueur'], 'KESSLER', 'Fermez les portes !'),
+            S('entrepot', ['joueur', 'kessler'], 'LÉO', 'Pas ce soir.'),
+            S('docks', ['joueur'], null, 'Une seule personne au monde savait que vous veniez ce soir.')],
+    recompense: { info: 'L’entrepôt 7 était un piège. Marco vous a trahi.' } },
+
+  { n: 21, acte: 4, titre: 'Ce que Marco doit', donneur: 'okafor', gain: 0, temps: 120, nuit: true,
+    journal: 'Rattrape Marco à la marina avant qu’il ne s’enfuie.',
+    intro: [S('capitainerie', ['okafor', 'joueur'], 'OKAFOR', 'Ton ami… Il est à la marina. Il a un bateau. … Et pas beaucoup de temps.')],
+    etapes: [{ t: 'pnj', qui: 'marco', loc: 'marina', txt: 'Rattrapez Marco au bout du ponton de la marina.' }],
+    outro: [S('marina', ['marco', 'joueur'], 'MARCO', 'Tu sais pourquoi je porte une montre en or, champion ? Parce que Delorme me l’a offerte. Le jour où j’ai commencé à lui mentir sur toi.'),
+            S('marina', ['joueur', 'marco'], 'LÉO', 'Pourquoi ?'),
+            S('marina', ['marco'], 'MARCO', 'Je lui devais 50 000 $. Des jeux d’argent. Il a dit qu’il effaçait tout si je le tenais au courant.'),
+            S('marina', ['joueur', 'marco'], 'LÉO', 'Les camions qui arrivaient toujours trop vite. Le téléphone. « Il ne sait rien. » C’était toi.'),
+            S('marina', ['marco'], 'MARCO', 'C’était moi. Le vrai code de l’entrepôt, c’est 1979. L’année de l’inondation. Il ne pense qu’à ça.'),
+            S('marina', ['joueur', 'marco'], 'LÉO', 'Et maintenant, je fais quoi de toi ?'),
+            S('marina', ['marco'], 'MARCO', 'Ce que tu veux, champion. Pour une fois, je ne négocie pas.')],
+    choix: { q: 'Marco Vidal attend, assis au bout du ponton.',
+             a: ['Lui pardonner — il donne le vrai code et veut réparer',
+                 'Le livrer à Inès — il témoignera contre Delorme'],
+             effets: ['pardonMarco', 'livrerMarco'] },
+    recompense: { info: 'Marco devait 50 000 $ à Delorme. Le vrai code de l’entrepôt 7 est 1979.' } },
+
+  { n: 22, acte: 4, titre: 'Les plans du barrage', donneur: 'okafor', gain: 0, temps: 150,
+    journal: 'Vole un camion d’Horizon et entre dans l’entrepôt 7.',
+    intro: [S('capitainerie', ['okafor', 'joueur'], 'OKAFOR', 'Demain matin. Changement d’équipe à l’entrepôt 7. … Un camion d’Horizon entre sans contrôle. Prends-en un.')],
+    etapes: [{ t: 'prendre', loc: 'depot', veh: 'camion_horizon', txt: 'Volez un camion d’Horizon au dépôt du port.' },
+             { t: 'livrer', loc: 'entrepot7', r: 115, txt: 'Entrez dans l’entrepôt 7 pendant le changement d’équipe.' },
+             { t: 'objet', loc: 'ici', txt: 'Fouillez le bureau du fond.' }],
+    outro: [S('entrepot', ['joueur'], null, 'Une chemise cartonnée, beige, sans mystère : « PROJET BARRAGE ».'),
+            S('entrepot', ['joueur'], null, 'Pendant la prochaine tempête, ils feront sauter les vannes. L’eau fera le reste, et l’assurance appellera ça un accident.')],
+    recompense: { info: 'Projet Barrage : faire sauter les vannes pendant la prochaine tempête.' } },
+
+  { n: 23, acte: 4, titre: 'Le juge', donneur: 'ines', gain: 0, temps: 180, nuit: true,
+    journal: 'Protège Inès et conduis-la chez le juge Fabre.',
+    intro: [S('rue', ['ines', 'joueur'], 'INÈS', 'Brun est payé par Delorme, j’en suis sûre maintenant. Le dossier doit aller directement chez le juge Fabre. Je monte avec toi. Ils vont essayer de nous arrêter.')],
+    etapes: [{ t: 'passager', qui: 'ines', loc: 'ici', dest: 'maison_juge', r: 105, etoiles: 3,
+               txt: 'Conduisez Inès chez le juge Fabre en semant les voitures de Brun.' }],
+    outro: [S('villa', ['juge', 'ines'], 'LE JUGE FABRE', 'Le mandat est signé, lieutenante. … Maintenant, écoutez la radio.'),
+            S('villa', ['ines', 'joueur'], 'INÈS', 'La tempête arrive ce soir. Un jour plus tôt que prévu.'),
+            S('villa', ['joueur'], 'LÉO', 'Alors il n’attendra pas demain.')],
+    recompense: { info: 'Le mandat d’arrêt est signé. La tempête arrive ce soir.' } },
+
+  /* ---------------- ACTE V — FINAL, « LA TEMPÊTE » ---------------- */
+  { n: 24, acte: 5, titre: 'Sirènes', donneur: 'toto', gain: 0, temps: 120, nuit: true, tempete: true,
+    journal: 'Déclenche la sirène de l’école de la banlieue basse.',
+    intro: [S('tempete', ['toto', 'joueur'], 'TOTO', 'Frérot, l’école de la banlieue basse a une sirène d’alerte. Si elle sonne, tout le monde monte sur la colline. Moi, je préviens les voisins. À pied. Sous la pluie. Pour toi.')],
+    etapes: [{ t: 'aller', loc: 'ecole', r: 85, txt: 'Rejoignez l’école de la banlieue basse.' },
+             { t: 'objet', loc: 'ici', txt: 'Déclenchez la sirène d’alerte.' }],
+    outro: [S('ecole', ['joueur'], null, 'La sirène hurle dans la pluie. Les familles montent vers la colline, en pyjama, en pantoufles, avec les chiens.'),
+            S('ecole', ['toto'], 'TOTO', 'Frérot ! Je distribue des burgers aux gamins ! Ça les calme ! Ça me calme aussi !')],
+    recompense: { info: 'La banlieue basse est évacuée.' } },
+
+  { n: 25, acte: 5, titre: 'Le convoi', donneur: 'mamiejo', gain: 0, temps: 180, nuit: true, tempete: true,
+    journal: 'Arrête le camion d’explosifs avant qu’il n’atteigne le barrage.',
+    intro: [S('tempete', ['mamiejo'], 'MAMIE JO', 'Le gamin, mes voisins ont sorti les tracteurs. La route du barrage est bouchée. Le camion d’explosifs va devoir passer par le chemin de la forêt. Attends-le là-bas.')],
+    etapes: [{ t: 'intercepter', loc: 'camp', veh: 'camion_explosifs', txt: 'Interceptez le camion d’explosifs avant le barrage.' }],
+    outro: [S('tempete', ['joueur'], null, 'Le camion est en travers du fossé, phares dans la pluie. Au loin, la salle des vannes s’allume : Delorme est déjà là.')],
+    recompense: { info: 'Le camion d’explosifs est arrêté. Delorme est au barrage.' } },
+
+  { n: 26, acte: 5, titre: 'Les vannes', donneur: 'marco', gain: 0, temps: 150, nuit: true, tempete: true,
+    journal: 'Conduis ton passager jusqu’à la salle des vannes du barrage.',
+    intro: [S('tempete', ['marco', 'joueur'], 'MARCO', 'Champion. Une dernière affaire ensemble. Toi, tu attrapes Delorme. Moi, je ferme les vannes. Pour une fois, je donne au lieu de prendre.')],
+    etapes: [{ t: 'passager', qui: 'marco', loc: 'ici', dest: 'salle_vannes', r: 115, txt: 'Menez votre passager à la salle des vannes, en haut du barrage.' },
+             { t: 'attendre', loc: 'ici', s: 16, r: 160, txt: 'Couvrez-le pendant qu’il ferme les vannes à la main.' }],
+    outro: [S('vannes', ['marco'], 'MARCO', 'Champion, tu m’entends ? La dernière vanne est dure. Mais elle bouge.'),
+            S('vannes', ['joueur'], 'LÉO', 'Sors de là, Marco. L’eau monte.'),
+            S('vannes', ['marco'], 'MARCO', 'Si je lâche, elle se rouvre. C’est comme une dette, ça. Faut payer jusqu’au bout.'),
+            S('vannes', ['joueur'], 'LÉO', 'Marco !'),
+            S('vannes', ['marco'], 'MARCO', 'Dis à ton père que j’ai bien aimé sa voiture. … C’est fait, champion.'),
+            S('tempete', ['joueur'], null, 'La radio ne renvoie plus que le bruit de l’eau. Le barrage tient.')],
+    recompense: { info: 'Les vannes sont fermées. Le barrage tient.' } },
+
+  { n: 27, acte: 5, titre: 'La route du lac', donneur: 'ines', gain: 0, temps: 180, nuit: true, tempete: true,
+    journal: 'Poursuis Delorme jusqu’au dernier quai du port.',
+    intro: [S('tempete', ['ines'], 'INÈS', 'Delorme s’enfuit vers le port par la route du lac. Son yacht l’attend. S’il prend le large, on ne le reverra jamais.')],
+    etapes: [{ t: 'poursuite', loc: 'route_lac', txt: 'Rattrapez la voiture de Delorme.' },
+             { t: 'aller', loc: 'dernier_quai', r: 110, txt: 'Suivez-le jusqu’au dernier quai du port.' }],
+    outro: [S('quai', ['joueur'], null, 'La voiture de Delorme s’arrête au bout du quai, portière ouverte, essuie-glaces encore battants.'),
+            S('quai', ['okafor'], 'OKAFOR', 'Son yacht ne viendra pas, petit. … J’ai fait fermer le port.')],
+    recompense: { info: 'Delorme est coincé au bout du dernier quai.' } },
+
+  { n: 28, acte: 5, titre: 'Le dernier quai', donneur: 'delorme', gain: 0, temps: 90, nuit: true, tempete: true,
+    journal: 'Rejoins Delorme au bout du quai. Puis choisis.',
+    intro: [S('quai', ['delorme'], 'DELORME', 'Venez, mon jeune ami. Il n’y a plus que vous, moi, et la pluie. Parlons.')],
+    etapes: [{ t: 'pnj', qui: 'delorme', loc: 'dernier_quai', txt: 'Marchez jusqu’à Delorme, au bout du quai.' }],
+    outro: [S('quai', ['delorme', 'joueur'], 'DELORME', 'Vous avez sonné la sirène. Bien. Je l’avais prévu, vous savez. Personne ne devait mourir. Seulement perdre. Comme nous, en 1979.'),
+            S('quai', ['joueur', 'delorme'], 'LÉO', 'Vous avez brûlé notre garage. Vous avez mis mon père en prison.'),
+            S('quai', ['delorme'], 'DELORME', 'Et la ville m’a laissé sur un toit pendant trois jours, quand j’avais neuf ans. Personne n’est venu. Moi, je ne laisserai plus jamais les autres décider.'),
+            S('quai', ['joueur', 'delorme'], 'LÉO', 'Alors vous avez décidé à leur place. Comme ceux que vous détestez.'),
+            S('quai', ['delorme'], 'DELORME', '… Faisons simple, mon jeune ami. J’ai de l’argent, des avocats, et votre père peut sortir demain. Dites-moi votre prix.'),
+            S('quai', ['joueur'], 'INÈS (radio)', 'Marchand, j’arrive dans deux minutes. Ne fais rien de stupide.'),
+            S('quai', ['joueur', 'delorme'], 'LÉO', 'Mon père dit qu’on ne répare pas tout avec un marteau.'),
+            S('quai', ['delorme'], 'DELORME', 'Alors, avec quoi réparez-vous ?')],
+    choix: { q: 'Alors, avec quoi réparez-vous ?',
+             a: ['Avec la loi. — remettre Delorme à Inès',
+                 'Avec votre argent. — accepter le marché',
+                 'Avec la vérité. — le faire avouer en direct sur Liberty FM'],
+             effets: ['finJustice', 'finPrix', 'finAveu'] } }
 ];
 
 /* ======================================================================
@@ -26902,6 +26991,2025 @@ JoueurDistant.prototype.dessiner = function (g, Gm) {
   _dessinerJDGF.call(this, g, Gm);
 };
 
+
+
+/* ======================================================================
+   MODE HISTOIRE — « LIBERTY LAKE : EAUX TROUBLES »
+   1. PERSONNAGES ET DÉCORS DE SCÈNE
+   Léo Marchand, mécanicien, perd son garage dans un incendie et remonte
+   la piste jusqu'à Victor Delorme. Les huit personnages du scénario
+   reçoivent ici leur palette, et les lieux de l'histoire leurs décors de
+   cinématique. On n'écrase rien : on ajoute des entrées aux deux tables
+   que le lecteur de scènes consulte déjà.
+   ====================================================================== */
+
+/* --- palettes : un aplat de haut, un de bas, la peau, les cheveux, et
+   l'accessoire qui suffit à reconnaître quelqu'un en silhouette. --- */
+Object.assign(PERSOS, {
+  paul:     { haut: '#4a5a62', bas: '#2e3640', peau: '#d8b48c', cheveux: '#9aa0a6',
+              casquette: '#39434f', carrure: 1.14, pose: 'poche' },
+  toto:     { haut: '#e0963a', bas: '#2f3440', peau: '#8a5f3a', cheveux: '#1b1b1f',
+              casquette: '#e0963a', carrure: 1.06, pose: 'ouvert' },
+  ines:     { haut: '#2c3a52', bas: '#20283a', peau: '#e3bd97', cheveux: '#2a2017',
+              carrure: 0.96, pose: 'croise' },
+  mamiejo:  { haut: '#7a8a4a', bas: '#4a4030', peau: '#e8c6a8', cheveux: '#d8dce0',
+              chapeau: '#a89050', carrure: 0.94 },
+  okafor:   { haut: '#2f5a6a', bas: '#243a3a', peau: '#5a3c28', cheveux: '#1b1b1f',
+              casquette: '#1f3a4a', carrure: 1.18, pose: 'poche' },
+  delorme:  { haut: '#1f2630', bas: '#161a20', peau: '#e8d4c0', cheveux: '#b9c0c8',
+              carrure: 1.04, pose: 'poche' },
+  lopez:    { haut: '#b24a6a', bas: '#3a3340', peau: '#c99a6f', cheveux: '#2a2017',
+              carrure: 0.9 },
+  gege:     { haut: '#6a5a3a', bas: '#3a3730', peau: '#c99a6f', cheveux: '#8a8a8a',
+              casquette: '#4a4030', carrure: 1.22 },
+  kessler:  { haut: '#23252b', bas: '#1a1c20', peau: '#d8b48c', cheveux: '#1b1b1f',
+              carrure: 1.2, pose: 'croise' },
+  brun:     { haut: '#39414e', bas: '#262c36', peau: '#e3bd97', cheveux: '#6a6a6a',
+              casquette: '#1b2433', carrure: 1.12 },
+  corbeau:  { haut: '#1f2228', bas: '#191b20', peau: '#c99a6f', cheveux: '#1b1b1f',
+              casquette: '#14161a', carrure: 1.08 },
+  juge:     { haut: '#2a2a33', bas: '#1e1e26', peau: '#f0d4b4', cheveux: '#d8dce0',
+              lunettes: true, carrure: 1.06 },
+  kim:      { haut: '#c8402f', bas: '#23262c', peau: '#e3bd97', cheveux: '#1b1b1f',
+              carrure: 0.95, pose: 'ouvert' },
+  sly:      { haut: '#4a3b6a', bas: '#2a2433', peau: '#6a4428', cheveux: '#2a2017',
+              bonnet: '#7ae582', carrure: 1 },
+  bernard:  { haut: '#8a7a5a', bas: '#3a3730', peau: '#e8c6a8', cheveux: '#9a9a9a',
+              lunettes: true, carrure: 1.08 },
+  sow:      { haut: '#e8eef5', bas: '#2a3340', peau: '#5a3c28', cheveux: '#1b1b1f',
+              carrure: 0.95 }
+});
+
+/* --- nom affiché d'un personnage : HUD, infobulles et carte --- */
+const NOMS_ET = {
+  joueur: 'Léo', paul: 'Paul Marchand', toto: 'Toto', marco: 'Marco Vidal',
+  ines: 'Inès Cordier', mamiejo: 'Mamie Jo', okafor: 'Capitaine Okafor',
+  delorme: 'Victor Delorme', lopez: 'Mme Lopez', gege: 'Gégé', kessler: 'Kessler',
+  brun: 'Commissaire Brun', corbeau: 'un Corbeau', juge: 'Juge Fabre',
+  kim: 'Kim Tran', sly: 'Sly', bernard: 'Bernard', sow: 'Dr Sow'
+};
+const nomPerso = k => NOMS_ET[k] || k;
+
+/* ======================================================================
+   DÉCORS DE L'HISTOIRE
+   Même grammaire que les décors d'origine : un ciel, des plans de
+   silhouettes, deux ou trois détails animés, rien en mémoire.
+   ====================================================================== */
+Object.assign(Scene.DECORS, {
+  /* ---- le garage Marchand : l'atelier, de jour, porte ouverte ---- */
+  garage(g, W, H, t) {
+    Scene.ciel(g, W, H, '#3a3b42', '#24262c');
+    g.fillStyle = '#2f3137'; g.fillRect(0, H * 0.12, W, H * 0.68);          // mur de tôle
+    g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 2;
+    for (let x = 0; x < W; x += 26) { g.beginPath(); g.moveTo(x, H * 0.12); g.lineTo(x, H * 0.8); g.stroke(); }
+    // enseigne : haut et petit, pour ne pas écraser un plan rapproché
+    g.fillStyle = '#1d1f24'; g.fillRect(W * 0.05, H * 0.1, W * 0.26, H * 0.07);
+    g.fillStyle = '#ffa33d'; g.font = '700 ' + Math.round(H * 0.035) + 'px ' + ART.hud.police;
+    g.fillText('MARCHAND & FILS', W * 0.065, H * 0.148);
+    // établi, outils suspendus
+    g.fillStyle = '#4a4138'; g.fillRect(W * 0.6, H * 0.6, W * 0.36, H * 0.06);
+    g.fillStyle = '#6a7078';
+    for (let i = 0; i < 7; i++) g.fillRect(W * (0.62 + i * 0.045), H * 0.36, 3, H * (0.05 + (i % 3) * 0.025));
+    // pont élévateur et la voiture dessus : au ras du sol, derrière les acteurs
+    g.fillStyle = '#3a4048'; g.fillRect(W * 0.26, H * 0.73, W * 0.2, H * 0.05);
+    g.fillStyle = '#2f6fd8'; rr(g, W * 0.265, H * 0.66, W * 0.19, H * 0.07, 6); g.fill();
+    g.fillStyle = 'rgba(180,220,245,.35)'; g.fillRect(W * 0.3, H * 0.675, W * 0.11, H * 0.026);
+    Scene.sol(g, W, H, '#33353b', 0.8);
+    g.fillStyle = 'rgba(16,18,22,.5)';                                       // traces d'huile
+    for (let i = 0; i < 5; i++) {
+      g.beginPath(); g.ellipse(W * (0.12 + i * 0.19), H * (0.88 + (i % 2) * 0.04), 26, 7, 0, 0, TAU); g.fill();
+    }
+    Scene.halo(g, W * 0.5, H * 0.14, H * 0.5, '#ffd9a0', 0.16 + 0.02 * Math.sin(t * 7));
+  },
+
+  /* ---- la nuit de l'incendie : le garage brûle, gyrophares ---- */
+  incendie(g, W, H, t) {
+    Scene.ciel(g, W, H, '#1a1014', '#3a1a10');
+    const puls = 0.6 + 0.4 * Math.abs(Math.sin(t * 2.1));
+    Scene.halo(g, W * 0.46, H * 0.56, H * 0.9, '#ff6a20', 0.34 * puls);
+    g.fillStyle = '#17181d'; g.fillRect(0, H * 0.2, W, H * 0.62);            // la carcasse du bâtiment
+    // baies : le feu est DEDANS, et c'est par là qu'il se voit
+    for (let i = 0; i < 4; i++) {
+      const bx = W * (0.08 + i * 0.23), by = H * 0.26, bw = W * 0.13, bh = H * 0.22;
+      g.fillStyle = '#0a0b0e'; g.fillRect(bx, by, bw, bh);
+      const vif = 0.45 + 0.3 * Math.sin(t * (2.6 + i * 0.7) + i);
+      const gr = g.createLinearGradient(0, by + bh, 0, by);
+      gr.addColorStop(0, 'rgba(255,190,90,' + (0.85 * vif + 0.15) + ')');
+      gr.addColorStop(0.5, 'rgba(230,90,24,' + (0.6 * vif) + ')');
+      gr.addColorStop(1, 'rgba(120,30,12,0)');
+      g.fillStyle = gr; g.fillRect(bx + 3, by + 3, bw - 6, bh - 6);
+      // la charpente barre la baie
+      g.fillStyle = 'rgba(10,11,14,.8)';
+      g.fillRect(bx + bw * 0.46, by, 4, bh);
+      g.fillRect(bx, by + bh * 0.52, bw, 3);
+    }
+    // le toit est tombé : une silhouette déchiquetée au-dessus
+    g.fillStyle = '#101115';
+    g.beginPath(); g.moveTo(0, H * 0.2);
+    for (let x = 0; x <= W; x += W / 11)
+      g.lineTo(x, H * (0.2 - 0.03 * Math.abs(Math.sin(x * 0.013 + 1.7))));
+    g.lineTo(W, H * 0.2); g.closePath(); g.fill();
+    /* Flammes : trois nappes de langues, tracées en courbes — des
+       segments droits entre points écartés donnaient des triangles de
+       papier. Elles brûlent au pied du bâtiment, derrière les acteurs. */
+    const base = H * 0.76;
+    for (let k = 0; k < 3; k++) {
+      const amp = H * (0.055 + 0.105 * (1 - k * 0.3)), pas = W / (16 + k * 5);
+      g.fillStyle = ['rgba(190,46,12,.92)', 'rgba(248,124,24,.88)', 'rgba(255,212,118,.8)'][k];
+      g.beginPath(); g.moveTo(-pas, base);
+      let px = -pas, py = base;
+      for (let x = -pas; x <= W + pas * 2; x += pas) {
+        const o = x * 0.021 + k * 2.3;
+        // deux harmoniques : la langue ondule et vacille
+        const n = 0.3 + 0.38 * Math.abs(Math.sin(t * (3.1 + k * 0.8) + o)) +
+                  0.32 * Math.abs(Math.sin(t * (5.4 + k) + o * 1.9));
+        const nx = x, ny = base - amp * n;
+        // creux entre deux pointes : la courbe redescend presque au pied
+        g.quadraticCurveTo((px + nx) / 2, base - amp * 0.12, nx, ny);
+        px = nx; py = ny;
+      }
+      g.lineTo(W + pas * 2, base); g.lineTo(-pas, base); g.closePath(); g.fill();
+    }
+    // cœur du brasier : une lueur chaude au ras du sol
+    const coeur = g.createLinearGradient(0, base, 0, base - H * 0.2);
+    coeur.addColorStop(0, 'rgba(255,220,140,.5)');
+    coeur.addColorStop(1, 'rgba(255,120,30,0)');
+    g.fillStyle = coeur; g.fillRect(0, base - H * 0.2, W, H * 0.2);
+    // braises emportées par le tirage
+    g.fillStyle = 'rgba(255,190,90,.75)';
+    for (let i = 0; i < 22; i++) {
+      const u = (t * 0.4 + i * 0.137) % 1;
+      g.globalAlpha = (1 - u) * 0.8;
+      g.fillRect(W * ((i * 37 % 100) / 100) + Math.sin(t * 2 + i) * 16, base - u * H * 0.5, 2.4, 2.4);
+    }
+    g.globalAlpha = 1;
+    // fumée : volutes basses, larges et très diluées
+    for (let i = 0; i < 7; i++) {
+      g.fillStyle = 'rgba(38,34,36,' + (0.22 - i * 0.025) + ')';
+      g.beginPath();
+      g.arc(W * (0.12 + i * 0.13) + Math.sin(t * 0.7 + i) * 26, H * (0.34 - i * 0.028), H * (0.1 + i * 0.03), 0, TAU);
+      g.fill();
+    }
+    // le bitume devant : sombre, juste léché par la lumière du feu
+    Scene.sol(g, W, H, '#241c20', 0.74);
+    g.fillStyle = 'rgba(255,140,60,.16)'; g.fillRect(0, H * 0.74, W, H * 0.26);
+    g.fillStyle = 'rgba(255,170,80,.1)';
+    for (let i = 0; i < 5; i++) {
+      g.beginPath(); g.ellipse(W * (0.1 + i * 0.2), H * (0.84 + (i % 2) * 0.07), W * 0.09, H * 0.02, 0, 0, TAU); g.fill();
+    }
+    // gyrophares des pompiers, hors champ à droite
+    const gy = (Math.sin(t * 4) + 1) / 2;
+    Scene.halo(g, W * 0.96, H * 0.6, H * 0.5, '#4d7aff', 0.3 * gy);
+    Scene.halo(g, W * 0.9, H * 0.62, H * 0.4, '#ff4d4d', 0.3 * (1 - gy));
+  },
+
+  /* ---- le parloir : table, vitre grillagée, néon froid ---- */
+  parloir(g, W, H, t) {
+    Scene.ciel(g, W, H, '#2a2f36', '#1b1f24');
+    g.fillStyle = '#343b44'; g.fillRect(0, H * 0.1, W, H * 0.66);
+    g.fillStyle = '#2a3038'; g.fillRect(0, H * 0.1, W, H * 0.06);
+    // vitre et grillage
+    g.fillStyle = 'rgba(150,190,220,.14)'; g.fillRect(W * 0.1, H * 0.2, W * 0.8, H * 0.34);
+    g.strokeStyle = 'rgba(20,24,30,.55)'; g.lineWidth = 2;
+    for (let x = W * 0.1; x <= W * 0.9; x += W * 0.04) { g.beginPath(); g.moveTo(x, H * 0.2); g.lineTo(x, H * 0.54); g.stroke(); }
+    for (let y = H * 0.2; y <= H * 0.54; y += H * 0.05) { g.beginPath(); g.moveTo(W * 0.1, y); g.lineTo(W * 0.9, y); g.stroke(); }
+    g.fillStyle = '#4a515a'; g.fillRect(0, H * 0.6, W, H * 0.07);            // table
+    Scene.sol(g, W, H, '#262b32', 0.78);
+    // néon : il grésille
+    const n = 0.3 + 0.08 * (Math.sin(t * 23) > 0.7 ? 0 : 1);
+    g.fillStyle = 'rgba(220,240,255,.5)'; g.fillRect(W * 0.25, H * 0.12, W * 0.5, 4);
+    Scene.halo(g, W * 0.5, H * 0.13, H * 0.42, '#cfe6ff', n);
+  },
+
+  /* ---- le parc de la banlieue, en plein jour ---- */
+  parc(g, W, H, t) {
+    Scene.ciel(g, W, H, '#8ab4e0', '#cfe0ea');
+    for (let i = 0; i < 3; i++) {                                            // nuages
+      g.fillStyle = 'rgba(255,255,255,.5)';
+      g.beginPath(); g.ellipse(W * (0.15 + i * 0.35) + Math.sin(t * 0.2 + i) * 14, H * (0.14 + (i % 2) * 0.06), W * 0.1, H * 0.035, 0, 0, TAU); g.fill();
+    }
+    Scene.blocs(g, W, H, 0.6, 'rgba(60,72,90,.5)', 6, 0.08, 0.2, 31);        // la banlieue au fond
+    Scene.sol(g, W, H, '#5a8a4a', 0.62);
+    g.fillStyle = '#4a7a3e'; g.fillRect(0, H * 0.62, W, H * 0.06);
+    // allée
+    g.fillStyle = '#b4a88a';
+    g.beginPath(); g.moveTo(W * 0.3, H); g.lineTo(W * 0.44, H * 0.66); g.lineTo(W * 0.58, H * 0.66); g.lineTo(W * 0.82, H); g.closePath(); g.fill();
+    // arbres : tronc et deux masses de feuillage
+    for (const p of [[0.1, 0.72, 1], [0.86, 0.68, 0.8], [0.68, 0.64, 0.55]]) {
+      const x = W * p[0], y = H * p[1], r = H * 0.1 * p[2];
+      g.fillStyle = 'rgba(20,30,20,.25)';
+      g.beginPath(); g.ellipse(x + 8, y + 6, r * 0.9, r * 0.3, 0, 0, TAU); g.fill();
+      g.fillStyle = '#4a3a28'; g.fillRect(x - r * 0.1, y - r * 0.9, r * 0.2, r * 0.9);
+      g.fillStyle = '#3e7a3a';
+      g.beginPath(); g.arc(x, y - r * 1.1, r, 0, TAU); g.fill();
+      g.fillStyle = '#4f9048';
+      g.beginPath(); g.arc(x - r * 0.3, y - r * 1.35, r * 0.65, 0, TAU); g.fill();
+    }
+    g.fillStyle = '#6a5440'; g.fillRect(W * 0.16, H * 0.74, W * 0.12, 6);    // banc
+    g.fillRect(W * 0.17, H * 0.76, 5, H * 0.04); g.fillRect(W * 0.26, H * 0.76, 5, H * 0.04);
+  },
+
+  /* ---- la casse : carcasses empilées, grue, pneus ---- */
+  casse(g, W, H, t) {
+    Scene.ciel(g, W, H, '#6a6a72', '#9a9a92');
+    // grue au fond, elle tourne lentement
+    g.strokeStyle = '#4a4036'; g.lineWidth = 6;
+    g.beginPath(); g.moveTo(W * 0.78, H * 0.72); g.lineTo(W * 0.78, H * 0.2); g.stroke();
+    g.save(); g.translate(W * 0.78, H * 0.2); g.rotate(Math.sin(t * 0.25) * 0.2);
+    g.lineWidth = 5; g.beginPath(); g.moveTo(-W * 0.2, 0); g.lineTo(W * 0.08, 0); g.stroke();
+    g.lineWidth = 2; g.beginPath(); g.moveTo(-W * 0.14, 0); g.lineTo(-W * 0.14, H * 0.14); g.stroke();
+    g.fillStyle = '#3a3a40'; g.fillRect(-W * 0.16, H * 0.14, W * 0.04, H * 0.04);
+    g.restore();
+    // empilements de carcasses
+    let r = 13;
+    const rnd = () => { r = (r * 16807) % 2147483647; return r / 2147483647; };
+    for (let col = 0; col < 7; col++) {
+      const x = W * (0.02 + col * 0.14), n = 2 + Math.floor(rnd() * 3);
+      for (let i = 0; i < n; i++) {
+        const w = W * 0.12 * (0.8 + rnd() * 0.3), h = H * 0.07;
+        g.fillStyle = ['#6a3b33', '#3b4a6a', '#5a5a4a', '#7a6a3a', '#4a4a52'][Math.floor(rnd() * 5)];
+        rr(g, x, H * 0.74 - i * h * 1.05, w, h, 4); g.fill();
+        g.fillStyle = 'rgba(0,0,0,.35)';
+        g.fillRect(x + w * 0.2, H * 0.74 - i * h * 1.05 + 3, w * 0.5, h * 0.35);
+      }
+    }
+    Scene.sol(g, W, H, '#6a6252', 0.8);
+    g.fillStyle = '#2a2a2e';                                                  // pneus au sol
+    for (let i = 0; i < 6; i++) {
+      g.beginPath(); g.ellipse(W * (0.08 + i * 0.16), H * (0.9 + (i % 2) * 0.04), 17, 7, 0, 0, TAU); g.fill();
+    }
+  },
+
+  /* ---- le club Le Néon ---- */
+  club(g, W, H, t) {
+    Scene.ciel(g, W, H, '#1a1020', '#2a1428');
+    g.fillStyle = '#231629'; g.fillRect(0, H * 0.15, W, H * 0.65);
+    // enseigne : deux néons qui respirent
+    g.fillStyle = 'rgba(255,60,140,.75)'; rr(g, W * 0.1, H * 0.2, W * 0.34, 8, 4); g.fill();
+    Scene.halo(g, W * 0.27, H * 0.21, W * 0.26, '#ff3c8c', 0.26 + 0.1 * Math.sin(t * 1.7));
+    g.fillStyle = 'rgba(77,226,255,.75)'; rr(g, W * 0.56, H * 0.26, W * 0.3, 6, 3); g.fill();
+    Scene.halo(g, W * 0.71, H * 0.27, W * 0.22, '#4de2ff', 0.24 + 0.1 * Math.sin(t * 2.3 + 1));
+    // foule en silhouette, elle bouge sur la musique
+    for (let i = 0; i < 12; i++) {
+      const x = W * (0.03 + i * 0.082), b = Math.sin(t * 3.4 + i * 1.1) * 5;
+      g.fillStyle = 'rgba(12,8,16,.78)';
+      rr(g, x, H * 0.52 + b, W * 0.045, H * 0.28, 8); g.fill();
+      g.beginPath(); g.arc(x + W * 0.022, H * 0.5 + b, W * 0.019, 0, TAU); g.fill();
+    }
+    Scene.sol(g, W, H, '#2a1a2a', 0.8);
+    // reflets du sol
+    g.fillStyle = 'rgba(255,60,140,.12)'; g.fillRect(0, H * 0.8, W, H * 0.2);
+    const st = Math.sin(t * 9) > 0.86 ? 0.18 : 0;
+    if (st) { g.fillStyle = 'rgba(255,255,255,' + st + ')'; g.fillRect(0, 0, W, H); }
+  },
+
+  /* ---- le bureau de Delorme, en haut de la tour ---- */
+  bureau(g, W, H, t) {
+    Scene.ciel(g, W, H, '#20262f', '#2c333d');
+    // baie vitrée : la ville en bas, très loin
+    g.fillStyle = '#0d131c'; g.fillRect(W * 0.06, H * 0.12, W * 0.88, H * 0.52);
+    Scene.blocs(g, W, H, 0.6, '#131a26', 11, 0.04, 0.16, 47);
+    g.fillStyle = 'rgba(255,214,140,.5)';
+    for (let i = 0; i < 70; i++) {
+      const a = i * 12.9898, b = i * 78.233;
+      const fx = W * 0.06 + (Math.abs(Math.sin(a) * 43758.5453) % 1) * W * 0.88;
+      const fy = H * 0.3 + (Math.abs(Math.sin(b) * 43758.5453) % 1) * H * 0.33;
+      g.globalAlpha = 0.3 + 0.7 * ((i * 7) % 5) / 5 * (0.6 + 0.4 * Math.sin(t * 1.4 + i));
+      g.fillRect(fx, fy, 2.5, 2.5);
+    }
+    g.globalAlpha = 1;
+    // meneaux et reflet du verre
+    g.fillStyle = '#39414c';
+    for (let i = 0; i <= 4; i++) g.fillRect(W * (0.06 + i * 0.22) - 3, H * 0.12, 6, H * 0.52);
+    g.fillRect(W * 0.06, H * 0.12, W * 0.88, 6);
+    g.fillStyle = 'rgba(200,230,255,.05)';
+    g.beginPath(); g.moveTo(W * 0.5, H * 0.12); g.lineTo(W * 0.78, H * 0.12); g.lineTo(W * 0.52, H * 0.64); g.lineTo(W * 0.34, H * 0.64); g.closePath(); g.fill();
+    // bureau massif, une lampe, une photo encadrée
+    g.fillStyle = '#2a2420'; g.fillRect(W * 0.1, H * 0.68, W * 0.5, H * 0.08);
+    g.fillStyle = '#1d1a17'; g.fillRect(W * 0.12, H * 0.76, W * 0.46, H * 0.1);
+    Scene.halo(g, W * 0.18, H * 0.64, H * 0.2, '#ffd9a0', 0.3);
+    g.fillStyle = '#6a5a3a'; g.fillRect(W * 0.46, H * 0.6, W * 0.07, H * 0.08);
+    g.fillStyle = '#2f5578'; g.fillRect(W * 0.47, H * 0.61, W * 0.05, H * 0.06);
+    Scene.sol(g, W, H, '#262a31', 0.86);
+  },
+
+  /* ---- la clairière au bord de la rivière ---- */
+  clairiere(g, W, H, t) {
+    Scene.ciel(g, W, H, '#7a94a8', '#b4c0b0');
+    // deux rideaux de conifères
+    g.fillStyle = '#243a2a';
+    for (let i = 0; i < 16; i++) {
+      const x = W * (i / 15), h = H * (0.2 + 0.1 * Math.abs(Math.sin(i * 2.3)));
+      g.beginPath(); g.moveTo(x, H * 0.56 - h); g.lineTo(x + W * 0.05, H * 0.58); g.lineTo(x - W * 0.05, H * 0.58); g.closePath(); g.fill();
+    }
+    g.fillStyle = '#1b2c20';
+    for (let i = 0; i < 11; i++) {
+      const x = W * (i / 10) + 20, h = H * 0.26;
+      g.beginPath(); g.moveTo(x, H * 0.62 - h); g.lineTo(x + W * 0.06, H * 0.64); g.lineTo(x - W * 0.06, H * 0.64); g.closePath(); g.fill();
+    }
+    Scene.sol(g, W, H, '#5a6a44', 0.64);
+    // la rivière, et la boue qui s'y déverse
+    g.fillStyle = '#3a5a68'; g.fillRect(0, H * 0.74, W, H * 0.16);
+    g.fillStyle = 'rgba(255,255,255,.12)';
+    for (let i = 0; i < 5; i++) g.fillRect((t * 22 + i * W / 5) % W, H * (0.77 + i * 0.025), W * 0.1, 2);
+    g.fillStyle = 'rgba(120,86,50,.75)';
+    g.beginPath(); g.ellipse(W * 0.62, H * 0.8, W * 0.22, H * 0.055, 0, 0, TAU); g.fill();
+    g.fillStyle = '#6b5a3a'; g.fillRect(W * 0.52, H * 0.66, W * 0.2, H * 0.09);   // la citerne, de dos
+    g.fillStyle = '#3a3a40'; g.fillRect(W * 0.7, H * 0.68, W * 0.08, H * 0.07);
+    Scene.sol(g, W, H, '#4a4032', 0.9);
+  },
+
+  /* ---- la grange de Mamie Jo ---- */
+  grange(g, W, H, t) {
+    Scene.ciel(g, W, H, '#241c16', '#17120e');
+    g.fillStyle = '#3a2a1c'; g.fillRect(0, H * 0.08, W, H * 0.72);
+    g.fillStyle = '#2a1e14';                                                  // planches
+    for (let x = 0; x < W; x += 34) g.fillRect(x, H * 0.08, 5, H * 0.72);
+    // charpente
+    g.strokeStyle = '#4a3624'; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(0, H * 0.12); g.lineTo(W * 0.5, H * 0.02); g.lineTo(W, H * 0.12); g.stroke();
+    g.lineWidth = 5; g.beginPath(); g.moveTo(W * 0.5, H * 0.03); g.lineTo(W * 0.5, H * 0.3); g.stroke();
+    // bottes de paille
+    for (const p of [[0.06, 0.6], [0.06, 0.48], [0.2, 0.6], [0.84, 0.6]]) {
+      g.fillStyle = '#b89a52'; rr(g, W * p[0], H * p[1], W * 0.12, H * 0.12, 6); g.fill();
+      g.fillStyle = 'rgba(90,70,30,.45)'; g.fillRect(W * p[0], H * (p[1] + 0.05), W * 0.12, 4);
+    }
+    Scene.sol(g, W, H, '#4a3a26', 0.8);
+    g.fillStyle = 'rgba(200,170,90,.25)';                                     // paille au sol
+    for (let i = 0; i < 24; i++) g.fillRect(W * ((i * 37 % 100) / 100), H * (0.84 + (i % 5) * 0.025), 13, 2);
+    // la lampe à pétrole se balance
+    const bx = Math.sin(t * 1.1) * 10;
+    g.strokeStyle = '#2a2018'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(W * 0.62, H * 0.06); g.lineTo(W * 0.62 + bx, H * 0.3); g.stroke();
+    g.fillStyle = '#ffd68a';
+    g.beginPath(); g.arc(W * 0.62 + bx, H * 0.33, 7, 0, TAU); g.fill();
+    Scene.halo(g, W * 0.62 + bx, H * 0.33, H * 0.42, '#ffbe6a', 0.26);
+  },
+
+  /* ---- les ruines du vieux moulin, au coucher du soleil ---- */
+  moulin(g, W, H, t) {
+    Scene.ciel(g, W, H, '#3a3058', '#ff9a5a');
+    g.fillStyle = 'rgba(255,200,120,.5)';
+    g.beginPath(); g.arc(W * 0.74, H * 0.54, H * 0.1, 0, TAU); g.fill();
+    Scene.halo(g, W * 0.74, H * 0.54, H * 0.5, '#ffb070', 0.3);
+    Scene.cretes(g, W, H, 0.6, '#4a3a52', false, 19, 0.12);
+    // le lac prend la lumière
+    g.fillStyle = '#4a4068'; g.fillRect(0, H * 0.6, W, H * 0.4);
+    g.fillStyle = 'rgba(255,170,100,.3)';
+    for (let i = 0; i < 9; i++) {
+      const y = H * (0.62 + i * 0.035), w = W * (0.04 + i * 0.016);
+      g.fillRect(W * 0.74 - w / 2 + Math.sin(t * 1.3 + i) * 6, y, w, 3);
+    }
+    // la tour du moulin, éventrée
+    g.fillStyle = '#2f2a30';
+    g.beginPath();
+    g.moveTo(W * 0.2, H); g.lineTo(W * 0.21, H * 0.26); g.lineTo(W * 0.3, H * 0.2);
+    g.lineTo(W * 0.38, H * 0.3); g.lineTo(W * 0.37, H); g.closePath(); g.fill();
+    g.fillStyle = '#1f1b22'; g.fillRect(W * 0.25, H * 0.42, W * 0.07, H * 0.12);
+    // la roue tourne encore un peu
+    g.save(); g.translate(W * 0.41, H * 0.6); g.rotate(t * 0.22);
+    g.strokeStyle = '#3a3028'; g.lineWidth = 4;
+    for (let i = 0; i < 8; i++) {
+      g.beginPath(); g.moveTo(0, 0);
+      g.lineTo(Math.cos(i * TAU / 8) * H * 0.14, Math.sin(i * TAU / 8) * H * 0.14); g.stroke();
+    }
+    g.restore();
+    Scene.sol(g, W, H, '#2a2628', 0.9);
+  },
+
+  /* ---- la capitainerie : le bureau d'Okafor ---- */
+  capitainerie(g, W, H, t) {
+    Scene.ciel(g, W, H, '#2a3540', '#1d252c');
+    g.fillStyle = '#35424c'; g.fillRect(0, H * 0.1, W, H * 0.68);
+    // fenêtre sur les quais : mâts et eau
+    g.fillStyle = '#17242e'; g.fillRect(W * 0.52, H * 0.18, W * 0.42, H * 0.34);
+    g.fillStyle = '#3f5f72'; g.fillRect(W * 0.52, H * 0.42, W * 0.42, H * 0.1);
+    g.strokeStyle = '#8a9aa6'; g.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const x = W * (0.56 + i * 0.08), h = H * (0.1 + (i % 3) * 0.05);
+      g.beginPath(); g.moveTo(x, H * 0.42); g.lineTo(x + Math.sin(t * 0.7 + i) * 3, H * 0.42 - h); g.stroke();
+    }
+    g.fillStyle = '#4a5a64';
+    for (let i = 0; i <= 3; i++) g.fillRect(W * (0.52 + i * 0.14) - 2, H * 0.18, 5, H * 0.34);
+    // cartes marines punaisées, un fanal, un bureau
+    g.fillStyle = '#cfc0a0'; g.fillRect(W * 0.08, H * 0.2, W * 0.18, H * 0.14);
+    g.strokeStyle = 'rgba(60,90,110,.6)'; g.lineWidth = 1;
+    for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(W * 0.17, H * 0.27, 6 + i * 7, 0, TAU); g.stroke(); }
+    g.fillStyle = '#2a3038'; g.fillRect(W * 0.04, H * 0.62, W * 0.44, H * 0.08);
+    g.fillStyle = '#ffd68a';
+    g.beginPath(); g.arc(W * 0.4, H * 0.58, 6, 0, TAU); g.fill();
+    Scene.halo(g, W * 0.4, H * 0.58, H * 0.36, '#ffbe6a', 0.2 + 0.03 * Math.sin(t * 2));
+    Scene.sol(g, W, H, '#2a3138', 0.84);
+  },
+
+  /* ---- la marina, de nuit : pontons et reflets ---- */
+  marina(g, W, H, t) {
+    Scene.ciel(g, W, H, '#101a28', '#1b2c3e');
+    Scene.blocs(g, W, H, 0.42, '#0d1620', 9, 0.05, 0.16, 53);
+    g.fillStyle = 'rgba(255,220,150,.45)';
+    for (let i = 0; i < 16; i++) g.fillRect(W * (0.03 + i * 0.062), H * (0.3 + (i % 3) * 0.03), 3, 3);
+    // l'eau
+    g.fillStyle = '#13283a'; g.fillRect(0, H * 0.42, W, H * 0.58);
+    g.fillStyle = 'rgba(255,220,150,.14)';
+    for (let i = 0; i < 26; i++) {
+      const x = W * ((i * 41 % 100) / 100);
+      g.fillRect(x + Math.sin(t * 1.4 + i) * 5, H * (0.46 + (i % 9) * 0.05), W * 0.03, 2);
+    }
+    // le ponton part vers le fond
+    g.fillStyle = '#4a4036';
+    g.beginPath(); g.moveTo(W * 0.3, H); g.lineTo(W * 0.42, H * 0.46); g.lineTo(W * 0.58, H * 0.46); g.lineTo(W * 0.74, H); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(20,16,12,.4)';
+    for (let i = 0; i < 9; i++) {
+      const u = i / 8, y = H * (0.46 + u * 0.54);
+      g.fillRect(W * (0.42 - u * 0.12), y, W * (0.16 + u * 0.32), 3);
+    }
+    // deux coques amarrées, elles tanguent
+    for (const p of [[0.14, 0.62, 1], [0.86, 0.56, 0.8]]) {
+      g.save(); g.translate(W * p[0], H * p[1]); g.rotate(Math.sin(t * 1.2 + p[0] * 9) * 0.04);
+      g.fillStyle = '#e8eef5';
+      g.beginPath(); g.moveTo(-W * 0.09 * p[2], 0); g.lineTo(W * 0.09 * p[2], 0);
+      g.lineTo(W * 0.06 * p[2], H * 0.05); g.lineTo(-W * 0.06 * p[2], H * 0.05); g.closePath(); g.fill();
+      g.strokeStyle = '#8a9aa6'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -H * 0.2 * p[2]); g.stroke();
+      g.restore();
+    }
+    Scene.halo(g, W * 0.5, H * 0.44, H * 0.4, '#9ec5ff', 0.1);
+  },
+
+  /* ---- l'école de la banlieue basse, sous l'orage ---- */
+  ecole(g, W, H, t) {
+    Scene.ciel(g, W, H, '#161b26', '#232c38');
+    const ec = Math.sin(t * 1.7) > 0.95 ? 1 : 0;
+    if (ec) { g.fillStyle = 'rgba(190,210,255,.3)'; g.fillRect(0, 0, W, H); }
+    // le bâtiment, bas et long
+    g.fillStyle = '#2e3742'; g.fillRect(W * 0.06, H * 0.38, W * 0.88, H * 0.38);
+    g.fillStyle = '#242c36'; g.fillRect(W * 0.06, H * 0.34, W * 0.88, H * 0.05);
+    g.fillStyle = 'rgba(255,220,150,.3)';
+    for (let i = 0; i < 7; i++) g.fillRect(W * (0.1 + i * 0.12), H * 0.46, W * 0.07, H * 0.1);
+    // la sirène sur le toit : le cône tourne
+    g.fillStyle = '#4a515a'; g.fillRect(W * 0.48, H * 0.22, 6, H * 0.12);
+    g.fillStyle = '#c8402f';
+    g.beginPath(); g.arc(W * 0.49, H * 0.2, 9, 0, TAU); g.fill();
+    const bal = (Math.sin(t * 3.2) + 1) / 2;
+    Scene.halo(g, W * 0.49, H * 0.2, H * 0.4, '#ff7a5a', 0.14 + 0.2 * bal);
+    Scene.sol(g, W, H, '#262d36', 0.76);
+    // pluie battante et flaques
+    Scene.flocons(g, W, H, t, 90, 'rgba(180,210,240,.5)', 420);
+    g.fillStyle = 'rgba(140,180,220,.14)';
+    for (let i = 0; i < 5; i++) {
+      g.beginPath(); g.ellipse(W * (0.1 + i * 0.2), H * (0.86 + (i % 2) * 0.05), W * 0.07, H * 0.015, 0, 0, TAU); g.fill();
+    }
+  },
+
+  /* ---- le dernier quai, sous la pluie ---- */
+  quai(g, W, H, t) {
+    Scene.ciel(g, W, H, '#10151e', '#1b2430');
+    const ec = Math.sin(t * 1.3) > 0.94 ? 1 : 0;
+    if (ec) { g.fillStyle = 'rgba(200,220,255,.26)'; g.fillRect(0, 0, W, H); }
+    // grues de conteneurs en silhouette
+    g.strokeStyle = '#0e141c'; g.lineWidth = 8;
+    for (const x of [0.16, 0.44, 0.76]) {
+      g.beginPath(); g.moveTo(W * x, H * 0.62); g.lineTo(W * x, H * 0.16);
+      g.lineTo(W * (x + 0.16), H * 0.22); g.stroke();
+      g.lineWidth = 4; g.beginPath(); g.moveTo(W * (x + 0.1), H * 0.2); g.lineTo(W * (x + 0.1), H * 0.36); g.stroke();
+      g.lineWidth = 8;
+    }
+    // l'eau noire
+    g.fillStyle = '#0d1a24'; g.fillRect(0, H * 0.56, W, H * 0.2);
+    g.fillStyle = 'rgba(160,200,230,.1)';
+    for (let i = 0; i < 14; i++) g.fillRect(W * ((i * 53 % 100) / 100), H * (0.58 + (i % 5) * 0.03), W * 0.05, 2);
+    // le quai, béton luisant
+    Scene.sol(g, W, H, '#232a32', 0.74);
+    g.fillStyle = 'rgba(150,190,220,.07)'; g.fillRect(0, H * 0.74, W, H * 0.26);
+    g.fillStyle = '#39414c';
+    for (let i = 0; i < 4; i++) g.fillRect(W * (0.08 + i * 0.28), H * 0.78, 16, 18);   // bollards
+    // un lampadaire de quai, sa lumière rase la pluie
+    g.fillStyle = '#1a1e26'; g.fillRect(W * 0.88, H * 0.3, 6, H * 0.46);
+    g.fillRect(W * 0.84, H * 0.29, W * 0.06, 5);
+    Scene.halo(g, W * 0.865, H * 0.31, H * 0.5, '#ffd9a0', 0.22);
+    Scene.flocons(g, W, H, t, 120, 'rgba(190,215,240,.55)', 500);
+  },
+
+  /* ---- la salle des vannes, l'eau qui monte ---- */
+  vannes(g, W, H, t) {
+    Scene.ciel(g, W, H, '#1c242c', '#121820');
+    g.fillStyle = '#2a333c'; g.fillRect(0, H * 0.06, W, H * 0.7);
+    // conduites horizontales
+    for (let i = 0; i < 3; i++) {
+      const y = H * (0.14 + i * 0.14);
+      g.fillStyle = '#4a5560'; g.fillRect(0, y, W, H * 0.07);
+      g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect(0, y, W, 4);
+      g.fillStyle = '#39424c';
+      for (let x = 0; x < W; x += W * 0.18) g.fillRect(x, y - 3, 10, H * 0.07 + 6);
+    }
+    // deux volants de vanne, l'un tourne
+    for (const p of [[0.24, 0.5, 1], [0.72, 0.52, -1]]) {
+      g.save(); g.translate(W * p[0], H * p[1]); g.rotate(t * 0.9 * p[2]);
+      g.strokeStyle = '#c8402f'; g.lineWidth = 6;
+      g.beginPath(); g.arc(0, 0, H * 0.09, 0, TAU); g.stroke();
+      g.lineWidth = 4;
+      for (let i = 0; i < 4; i++) {
+        g.beginPath(); g.moveTo(0, 0);
+        g.lineTo(Math.cos(i * TAU / 4) * H * 0.09, Math.sin(i * TAU / 4) * H * 0.09); g.stroke();
+      }
+      g.restore();
+    }
+    // l'eau au sol, elle monte et clapote
+    const niv = 0.84 - 0.04 * (0.5 + 0.5 * Math.sin(t * 0.6));
+    Scene.sol(g, W, H, '#2a3138', 0.8);
+    g.fillStyle = 'rgba(70,130,160,.72)'; g.fillRect(0, H * niv, W, H * (1 - niv));
+    g.fillStyle = 'rgba(200,235,255,.22)';
+    for (let i = 0; i < 12; i++) g.fillRect(W * ((i * 47 % 100) / 100) + Math.sin(t * 2 + i) * 8, H * niv, W * 0.05, 3);
+    Scene.halo(g, W * 0.5, H * 0.1, H * 0.45, '#9ec5ff', 0.12);
+  },
+
+  /* ---- la ville entière sous l'orage : plan large de l'acte V ---- */
+  tempete(g, W, H, t) {
+    Scene.ciel(g, W, H, '#0e121a', '#1e2834');
+    const ec = Math.sin(t * 1.1) > 0.93 || Math.sin(t * 2.7) > 0.985 ? 1 : 0;
+    if (ec) {
+      g.fillStyle = 'rgba(200,220,255,.3)'; g.fillRect(0, 0, W, H);
+      g.strokeStyle = 'rgba(230,240,255,.8)'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(W * 0.3, 0);
+      g.lineTo(W * 0.36, H * 0.18); g.lineTo(W * 0.3, H * 0.26); g.lineTo(W * 0.4, H * 0.5);
+      g.stroke();
+    }
+    // nuages bas
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle = 'rgba(26,32,42,.8)';
+      g.beginPath();
+      g.ellipse(W * (i * 0.26 - 0.05) + Math.sin(t * 0.3 + i) * 24, H * (0.1 + (i % 2) * 0.05),
+        W * 0.2, H * 0.07, 0, 0, TAU);
+      g.fill();
+    }
+    Scene.blocs(g, W, H, 0.7, '#141c26', 8, 0.16, 0.42, 71);
+    Scene.blocs(g, W, H, 0.76, '#0f161e', 5, 0.1, 0.24, 97);
+    Scene.sol(g, W, H, '#1a2128', 0.74);
+    // chaussée inondée : la lumière s'y renverse
+    g.fillStyle = 'rgba(120,170,210,.1)'; g.fillRect(0, H * 0.74, W, H * 0.26);
+    g.fillStyle = 'rgba(255,200,140,.12)';
+    for (let i = 0; i < 6; i++) g.fillRect(W * (0.06 + i * 0.16), H * 0.78, W * 0.04, H * 0.2);
+    Scene.flocons(g, W, H, t, 140, 'rgba(185,212,240,.5)', 540);
+  },
+
+  /* ---- le hangar à bateaux, la Comète à l'abri ---- */
+  hangarb(g, W, H, t) {
+    Scene.ciel(g, W, H, '#1d242a', '#141a1f');
+    g.fillStyle = '#2a3238'; g.fillRect(0, H * 0.08, W, H * 0.62);
+    g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 2;
+    for (let x = 0; x < W; x += 30) { g.beginPath(); g.moveTo(x, H * 0.08); g.lineTo(x, H * 0.7); g.stroke(); }
+    // charpente métallique
+    g.strokeStyle = '#3e474f'; g.lineWidth = 5;
+    for (let i = 0; i < 3; i++) {
+      const x = W * (0.2 + i * 0.3);
+      g.beginPath(); g.moveTo(x, H * 0.7); g.lineTo(x, H * 0.14); g.lineTo(x + W * 0.1, H * 0.2); g.stroke();
+    }
+    // le bassin intérieur : eau noire et une coque sur ber
+    g.fillStyle = '#13222c'; g.fillRect(0, H * 0.7, W, H * 0.3);
+    g.fillStyle = 'rgba(180,220,245,.08)';
+    for (let i = 0; i < 10; i++) g.fillRect(W * ((i * 61 % 100) / 100), H * (0.73 + (i % 4) * 0.05), W * 0.05, 2);
+    g.fillStyle = '#4a4036'; g.fillRect(W * 0.1, H * 0.66, W * 0.3, H * 0.05);
+    g.fillStyle = '#e8eef5';
+    g.beginPath(); g.moveTo(W * 0.1, H * 0.66); g.lineTo(W * 0.4, H * 0.66);
+    g.lineTo(W * 0.34, H * 0.58); g.lineTo(W * 0.16, H * 0.58); g.closePath(); g.fill();
+    // la lampe baladeuse se balance
+    const bx = Math.sin(t * 0.9) * 12;
+    g.strokeStyle = '#1a1e22'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(W * 0.68, H * 0.08); g.lineTo(W * 0.68 + bx, H * 0.34); g.stroke();
+    Scene.halo(g, W * 0.68 + bx, H * 0.36, H * 0.46, '#ffe2ae', 0.26);
+  },
+
+  /* ---- Liberty FM : le studio de Sly, sur un toit ---- */
+  radio(g, W, H, t) {
+    Scene.ciel(g, W, H, '#161228', '#2a2040');
+    Scene.blocs(g, W, H, 0.62, '#0f1220', 10, 0.06, 0.26, 29);
+    g.fillStyle = 'rgba(255,220,150,.4)';
+    for (let i = 0; i < 40; i++) {
+      const a = i * 12.9898, b = i * 78.233;
+      g.fillRect((Math.abs(Math.sin(a) * 43758.5453) % 1) * W,
+        H * 0.4 + (Math.abs(Math.sin(b) * 43758.5453) % 1) * H * 0.2, 2.5, 2.5);
+    }
+    // la cabane du studio
+    g.fillStyle = '#2a2436'; g.fillRect(W * 0.08, H * 0.4, W * 0.46, H * 0.32);
+    g.fillStyle = 'rgba(122,229,130,.3)'; g.fillRect(W * 0.12, H * 0.45, W * 0.2, H * 0.1);
+    g.fillStyle = '#7ae582'; g.font = '700 ' + Math.round(H * 0.045) + 'px ' + ART.hud.police;
+    g.fillText('LIBERTY FM', W * 0.13, H * 0.52);
+    // l'antenne et sa balise qui clignote
+    g.strokeStyle = '#6a7078'; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(W * 0.78, H * 0.62); g.lineTo(W * 0.78, H * 0.1); g.stroke();
+    g.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const y = H * (0.18 + i * 0.1);
+      g.beginPath(); g.moveTo(W * 0.74, y); g.lineTo(W * 0.82, y); g.stroke();
+    }
+    const bal = Math.sin(t * 3) > 0 ? 1 : 0.15;
+    g.fillStyle = 'rgba(200,64,47,' + bal + ')';
+    g.beginPath(); g.arc(W * 0.78, H * 0.09, 5, 0, TAU); g.fill();
+    Scene.halo(g, W * 0.78, H * 0.09, H * 0.2, '#ff5a4a', 0.2 * bal);
+    // ondes concentriques : la radio émet
+    g.strokeStyle = 'rgba(122,229,130,.22)'; g.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const r = ((t * 40 + i * 60) % 180);
+      g.globalAlpha = 1 - r / 180;
+      g.beginPath(); g.arc(W * 0.78, H * 0.09, r, 0, TAU); g.stroke();
+    }
+    g.globalAlpha = 1;
+    Scene.sol(g, W, H, '#241f30', 0.72);
+  }
+});
+
+/* --- étalonnage et ligne de sol des nouveaux décors --- */
+Object.assign(Scene.GRADE, {
+  garage:       { froid: '#5a6a84', a: 0.14, chaud: '#ffc078', b: 0.08, voile: '#6a7488' },
+  incendie:     { froid: '#6a3a30', a: 0.10, chaud: '#ff8a40', b: 0.22, voile: '#7a4030' },
+  parloir:      { froid: '#6a7a92', a: 0.20, chaud: '#dcebff', b: 0.04, voile: '#6a7686' },
+  parc:         { froid: '#8aa8c0', a: 0.06, chaud: '#ffe0a8', b: 0.08, voile: '#bcd0dc' },
+  casse:        { froid: '#7a7a7a', a: 0.10, chaud: '#ffc890', b: 0.06, voile: '#8a8884' },
+  club:         { froid: '#6a3a6a', a: 0.14, chaud: '#ff5a9a', b: 0.12, voile: '#4a2a44' },
+  bureau:       { froid: '#44506a', a: 0.16, chaud: '#ffd9a0', b: 0.08, voile: '#5a6478' },
+  clairiere:    { froid: '#6a8a84', a: 0.10, chaud: '#ffd8a0', b: 0.06, voile: '#90a89c' },
+  grange:       { froid: '#5a4a3a', a: 0.12, chaud: '#ffc070', b: 0.14, voile: '#4a3a2a' },
+  moulin:       { froid: '#5a4a72', a: 0.10, chaud: '#ffa86a', b: 0.18, voile: '#7a6080' },
+  capitainerie: { froid: '#4a6072', a: 0.16, chaud: '#ffd090', b: 0.07, voile: '#5a7080' },
+  marina:       { froid: '#2f4a68', a: 0.20, chaud: '#9ec5ff', b: 0.05, voile: '#3a5470' },
+  ecole:        { froid: '#44566e', a: 0.20, chaud: '#ff9a7a', b: 0.06, voile: '#50647a' },
+  quai:         { froid: '#34465a', a: 0.22, chaud: '#ffd09a', b: 0.05, voile: '#3e5064' },
+  vannes:       { froid: '#44606e', a: 0.20, chaud: '#d0e8ff', b: 0.05, voile: '#4a5e6a' },
+  tempete:      { froid: '#2a3a52', a: 0.24, chaud: '#bcd4ff', b: 0.04, voile: '#38485e' },
+  hangarb:      { froid: '#3a4a54', a: 0.20, chaud: '#ffe2ae', b: 0.07, voile: '#44545e' },
+  radio:        { froid: '#4a3a6a', a: 0.16, chaud: '#9ae8a0', b: 0.08, voile: '#3a3050' }
+});
+Object.assign(Scene.SOLS, {
+  garage: 0.86, incendie: 0.88, parloir: 0.84, parc: 0.9, casse: 0.88,
+  club: 0.86, bureau: 0.9, clairiere: 0.93, grange: 0.86, moulin: 0.94,
+  capitainerie: 0.88, marina: 0.9, ecole: 0.88, quai: 0.86, vannes: 0.88,
+  tempete: 0.86, hangarb: 0.88, radio: 0.8
+});
+
+
+/* ======================================================================
+   MODE HISTOIRE — « EAUX TROUBLES »
+   2. LIEUX DE L'HISTOIRE
+   Le scénario nomme trente-neuf lieux ; la carte, elle, est engendrée par
+   une graine. On les résout donc une fois pour toutes, dans un ordre
+   fixe, de façon déterministe : le garage Marchand reste le même bâtiment
+   d'un bout à l'autre de la partie, et après rechargement de la
+   sauvegarde. Un bâtiment déjà attribué n'est jamais repris par un autre
+   lieu, pour que deux missions ne se jouent pas au même endroit.
+   ====================================================================== */
+
+/* --- choix déterministe dans une liste : même monde, même lieu --- */
+const tirETage = (nom, liste) => liste[Scene.hash(nom) % liste.length];
+
+/* --- le massif est interdit à l'histoire : son col reste fermé tant que
+   le joueur n'a pas de tenue grand froid, et le barrage routier repousse
+   quiconque s'y aventure. Aucun lieu d'Eaux Troubles n'y est placé. --- */
+const horsMassifET = (x, y) => {
+  try { return !enMontagne(x, y); } catch (e) { return true; }
+};
+
+/* --- un bâtiment : par type d'abord, par biome ensuite, le plus grand
+   si le lieu doit faire repère (commissariat, tour, école…) --- */
+function batET(camp, nom, cles, biomes, grand) {
+  const W = camp.G.world;
+  for (const bm of biomes) {
+    let pool = W.buildings.filter(b => b.door && !camp.prisBat.has(b) &&
+      (!bm || b.biome === bm) && horsMassifET(b.cx, b.cy) &&
+      (!cles || cles.indexOf(b.special) >= 0 || cles.indexOf(b.gtype) >= 0));
+    if (grand) {
+      pool = pool.filter(b => b.w * b.h > 7000);
+      pool.sort((a, b) => (b.w * b.h) - (a.w * a.h) || a.cx - b.cx);
+      pool = pool.slice(0, 8);
+    } else {
+      pool.sort((a, b) => a.cx - b.cx || a.cy - b.cy);
+    }
+    if (!pool.length) continue;
+    const b = tirETage(nom, pool);
+    camp.prisBat.add(b);
+    return { x: b.door.x, y: b.door.y, b: b, nom: nom };
+  }
+  return null;
+}
+/* --- un nœud de route dans un biome, éventuellement filtré --- */
+function noeudET(camp, nom, biomes, pred) {
+  const W = camp.G.world;
+  for (const bm of biomes) {
+    const pool = W.nodes.filter(n => Biome.at(n.x, n.y) === bm &&
+      horsMassifET(n.x, n.y) && (!pred || pred(n)));
+    if (!pool.length) continue;
+    pool.sort((a, b) => a.x - b.x || a.y - b.y);
+    const n = tirETage(nom, pool);
+    return { x: n.x, y: n.y };
+  }
+  return null;
+}
+/* --- un nœud de route au bord de l'eau : clairière, moulin, rive --- */
+function bordEauET(camp, nom, biomes, dmax) {
+  const W = camp.G.world;
+  const pres = n => {
+    for (let a = 0; a < TAU; a += TAU / 8)
+      if (W.water.isWater(n.x + Math.cos(a) * (dmax || 260), n.y + Math.sin(a) * (dmax || 260))) return true;
+    return false;
+  };
+  return noeudET(camp, nom, biomes, pres) || noeudET(camp, nom, biomes);
+}
+/* --- le secteur du barrage : une ancre unique au bord du lac, en
+   campagne, puis des nœuds de route à la distance voulue autour d'elle.
+   Les quatre lieux du barrage forment ainsi un vrai secteur, accessible
+   en voiture, et le corps de l'ouvrage ne repousse personne. --- */
+function ancreBarrageET(camp) {
+  if (camp._ancreB) return camp._ancreB;
+  const W = camp.G.world;
+  // le nœud de campagne le plus entouré d'eau : la retenue du lac
+  const pool = W.nodes.filter(n => Biome.at(n.x, n.y) === 'campagne' && horsMassifET(n.x, n.y));
+  let best = null, bs = -1;
+  for (const n of pool) {
+    let k = 0;
+    for (let a = 0; a < TAU; a += TAU / 12)
+      if (W.water.isWater(n.x + Math.cos(a) * 300, n.y + Math.sin(a) * 300)) k++;
+    if (k > bs || (k === bs && best && n.x < best.x)) { bs = k; best = n; }
+  }
+  camp._ancreB = best ? { x: best.x, y: best.y } : { x: camp.G.player.x, y: camp.G.player.y };
+  return camp._ancreB;
+}
+function barrageET(camp, nom, r, eau) {
+  const W = camp.G.world, A = ancreBarrageET(camp);
+  if (!camp._prisB) camp._prisB = [];
+  const libre = n => camp._prisB.every(p => dist2(p.x, p.y, n.x, n.y) > 220 * 220);
+  const filtre = (n, exige) => {
+    if (!horsMassifET(n.x, n.y)) return false;
+    if (exige && !libre(n)) return false;          // déjà pris par un autre lieu du secteur
+    if (eau) {
+      for (let a = 0; a < TAU; a += TAU / 8)
+        if (W.water.isWater(n.x + Math.cos(a) * 260, n.y + Math.sin(a) * 260)) return true;
+      return false;
+    }
+    return true;
+  };
+  const tous = W.nodesNear(A.x, A.y, r + 1200);
+  let pool = tous.filter(n => filtre(n, true));
+  if (!pool.length) pool = tous.filter(n => filtre(n, false));   // secteur étroit : on tolère
+  if (!pool.length) return { x: A.x, y: A.y };
+  pool.sort((p, q) => Math.abs(dist(p.x, p.y, A.x, A.y) - r) - Math.abs(dist(q.x, q.y, A.x, A.y) - r) || p.x - q.x);
+  camp._prisB.push({ x: pool[0].x, y: pool[0].y });
+  return { x: pool[0].x, y: pool[0].y };
+}
+/* --- un quai du port : les cinq lieux portuaires se répartissent dessus --- */
+function quaiET(camp, nom, i) {
+  const W = camp.G.world;
+  if (W.docks.length) {
+    const d = W.docks[i % W.docks.length];
+    const u = 0.25 + 0.5 * ((i / Math.max(1, W.docks.length)) % 1);
+    return { x: d.x + d.w * u, y: d.y + d.h / 2 + (i % 2 ? 34 : -34) };
+  }
+  return bordEauET(camp, nom, ['port', 'campagne']);
+}
+
+/* --- la liste ordonnée : l'ordre fixe les attributions de bâtiments --- */
+const LIEUX_HISTOIRE = [
+  ['garage',           c => batET(c, 'garage', ['garage'], ['banlieue', 'ville', 'campagne'])],
+  ['ferme_aubry',      c => batET(c, 'ferme_aubry', ['barn'], ['campagne', 'banlieue'])],
+  ['grange',           c => batET(c, 'grange', ['barn'], ['campagne', 'banlieue'])],
+  ['club',             c => batET(c, 'club', ['bar'], ['ville', 'banlieue'])],
+  ['armurerie',        c => batET(c, 'armurerie', ['gun'], ['ville', 'campagne'])],
+  ['clinique_ville',   c => batET(c, 'clinique_ville', ['clinic'], ['ville', 'banlieue'])],
+  ['clinique_campagne', c => batET(c, 'clinique_campagne', ['clinic'], ['campagne', 'banlieue'])],
+  ['maison_lopez',     c => batET(c, 'maison_lopez', ['home', 'appart'], ['banlieue', 'ville'])],
+  ['capitainerie',     c => batET(c, 'capitainerie', ['hangar', 'entrepot'], ['port', 'ville'])],
+  ['entrepot7',        c => batET(c, 'entrepot7', ['entrepot', 'hangar'], ['port', 'ville'])],
+  ['depot',            c => batET(c, 'depot', ['hangar', 'entrepot'], ['port', 'ville', 'banlieue'])],
+  ['atelier',          c => batET(c, 'atelier', ['entrepot', 'hangar'], ['ville', 'banlieue'])],
+  ['casse',            c => batET(c, 'casse', ['entrepot', 'hangar', 'barn'], ['banlieue', 'campagne', 'ville'])],
+  ['tour',             c => batET(c, 'tour', null, ['ville'], true)],
+  ['commissariat',     c => batET(c, 'commissariat', null, ['banlieue'], true)],
+  ['parking',          c => batET(c, 'parking', null, ['ville'], true)],
+  ['hotel',            c => batET(c, 'hotel', null, ['ville'], true)],
+  ['banque',           c => batET(c, 'banque', null, ['ville'], true)],
+  ['studio',           c => batET(c, 'studio', null, ['ville'], true)],
+  ['ecole',            c => batET(c, 'ecole', null, ['banlieue'], true)],
+  ['maison_juge',      c => batET(c, 'maison_juge', null, ['banlieue', 'ville'], true)],
+  /* le toit du parking voisin : juste à côté de celui du rendez-vous */
+  ['toit',             c => { const p = c.lieux.parking; return p ? { x: p.x + 120, y: p.y - 90 } : batET(c, 'toit', null, ['ville'], true); }],
+  /* la ruelle : derrière le commissariat central, pas devant */
+  ['ruelle',           c => { const p = c.lieux.commissariat; return p ? { x: p.x - 130, y: p.y + 110 } : noeudET(c, 'ruelle', ['ville']); }],
+  ['parc',             c => {
+    const W = c.G.world;
+    const pool = W.parks.filter(p => Biome.at(p.x + p.w / 2, p.y + p.h / 2) === 'banlieue');
+    const l = (pool.length ? pool : W.parks).slice().sort((a, b) => a.x - b.x);
+    if (!l.length) return noeudET(c, 'parc', ['banlieue', 'ville']);
+    const p = tirETage('parc', l);
+    return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
+  }],
+  ['chantier',         c => {
+    const l = c.G.world.lots.slice().sort((a, b) => a.x - b.x);
+    if (!l.length) return noeudET(c, 'chantier', ['ville']);
+    const p = tirETage('chantier', l);
+    return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
+  }],
+  ['station_service',  c => {
+    const l = c.G.world.stations.filter(st => st && st.x !== undefined && horsMassifET(st.x, st.y));
+    if (!l.length) return noeudET(c, 'station_service', ['campagne']);
+    const st = tirETage('station_service', l.slice().sort((a, b) => a.x - b.x));
+    return { x: st.x, y: st.y };
+  }],
+  ['pont',             c => {
+    const l = c.G.world.bridges.filter(b => b.pts && b.pts.length > 1 && horsMassifET(b.pts[0].x, b.pts[0].y));
+    if (!l.length) return noeudET(c, 'pont', ['banlieue', 'ville']);
+    const b = tirETage('pont', l.slice().sort((x, y) => x.pts[0].x - y.pts[0].x));
+    return { x: b.pts[b.pts.length >> 1].x, y: b.pts[b.pts.length >> 1].y };
+  }],
+  ['clairiere',        c => bordEauET(c, 'clairiere', ['campagne'])],
+  ['moulin',           c => bordEauET(c, 'moulin', ['campagne'], 200)],
+  ['pommier',          c => bordEauET(c, 'pommier', ['campagne'], 320)],
+  ['route_lac',        c => bordEauET(c, 'route_lac', ['port', 'campagne'])],
+  ['camp',             c => barrageET(c, 'camp', 300)],
+  ['route_barrage',    c => barrageET(c, 'route_barrage', 800)],
+  ['salle_vannes',     c => barrageET(c, 'salle_vannes', 140)],
+  ['rive_barrage',     c => barrageET(c, 'rive_barrage', 420, true)],
+  ['quai_conteneurs',  c => quaiET(c, 'quai_conteneurs', 0)],
+  ['hangar_bateaux',   c => quaiET(c, 'hangar_bateaux', 1)],
+  ['marina',           c => quaiET(c, 'marina', 2)],
+  ['dernier_quai',     c => quaiET(c, 'dernier_quai', 3)],
+  ['quai_encheres',    c => quaiET(c, 'quai_encheres', 4)]
+];
+
+/* --- résolution unique, dans l'ordre de la liste --- */
+Campagne.prototype.resoudreLieux = function () {
+  if (this.lieux) return;
+  this.lieux = {}; this.prisBat = new Set();
+  const G = this.G;
+  for (const e of LIEUX_HISTOIRE) {
+    let p = null;
+    try { p = e[1](this); } catch (err) { p = null; }
+    if (!p) p = noeudET(this, e[0], ['ville', 'banlieue', 'campagne', 'port']);
+    if (p && !horsMassifET(p.x, p.y)) p = noeudET(this, e[0], ['campagne', 'banlieue', 'ville']);
+    if (!p) p = { x: G.player.x + 400, y: G.player.y };
+    // un lieu ne tombe ni dans l'eau profonde ni dans un mur : sinon le
+    // joueur ne peut pas s'y rendre, et son véhicule s'y fait repousser
+    if (G.world.deadlyWater(p.x, p.y) || (!p.b && G.world.buildingAt(p.x, p.y))) {
+      for (let i = 0; i < 64; i++) {
+        const a = i * 0.7, r = 40 + i * 14;
+        const x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
+        if (!G.world.deadlyWater(x, y) && !G.world.buildingAt(x, y)) { p = { x: x, y: y, b: p.b }; break; }
+      }
+    }
+    // deux lieux de plein air ne doivent pas désigner le même endroit :
+    // un bâtiment, lui, est déjà unique (il est retiré du vivier)
+    if (!p.b) {
+      const proche = q => dist2(q.x, q.y, p.x, p.y) < 190 * 190;
+      let occupe = null;
+      for (const k in this.lieux) if (proche(this.lieux[k])) { occupe = k; break; }
+      if (occupe) {
+        const libre = n => {
+          for (const k in this.lieux) if (dist2(this.lieux[k].x, this.lieux[k].y, n.x, n.y) < 190 * 190) return false;
+          return !G.world.deadlyWater(n.x, n.y) && horsMassifET(n.x, n.y);
+        };
+        const cand = G.world.nodesNear(p.x, p.y, 1400).filter(libre);
+        if (cand.length) {
+          cand.sort((a, b) => dist2(a.x, a.y, p.x, p.y) - dist2(b.x, b.y, p.x, p.y));
+          p = { x: cand[0].x, y: cand[0].y };
+        }
+      }
+    }
+    p.cle = e[0];
+    this.lieux[e[0]] = p;
+  }
+};
+
+/* --- aiguillage : les lieux de l'histoire d'abord, les anciens ensuite --- */
+const _lieuET = Campagne.prototype.lieu;
+Campagne.prototype.lieu = function (nom) {
+  if (nom === 'ici' || nom === 'auto') return _lieuET.call(this, nom);
+  this.resoudreLieux();
+  if (this.lieux[nom]) return this.lieux[nom];
+  return _lieuET.call(this, nom);
+};
+
+/* ======================================================================
+   3. VÉHICULES DE L'HISTOIRE
+   Une table de modèles nommés, et une navigation « vers un but » : les
+   voitures de l'IA choisissent au hasard à chaque carrefour, ce qui ne
+   convient ni à un camion qu'on suit, ni à un fourgon qu'on intercepte,
+   ni à une rivale de course. On préfère donc le lien qui rapproche du
+   but, avec une part de hasard pour ne pas tourner en rond.
+   ====================================================================== */
+const VEH_HISTOIRE = {
+  berline:          { kind: 'sedan',   col: '#8a9099', nom: 'la berline de Mme Lopez' },
+  la_comete:        { kind: 'muscle',  col: '#2f6fd8', nom: 'la Comète' },
+  vieille_bique:    { kind: 'pickup',  col: '#7a8a4a', nom: 'la Vieille Bique' },
+  la_fleche:        { kind: 'coupe',   col: '#c8402f', nom: 'la Flèche' },
+  camion_peche:     { kind: 'truck',   col: '#2f5a6a', nom: 'le camion de pêche' },
+  food_truck:       { kind: 'van',     col: '#e0963a', nom: 'le food-truck Toto Burger' },
+  camion_horizon:   { kind: 'truck',   col: '#3f5a8a', nom: 'un camion Horizon' },
+  camion_citerne:   { kind: 'truck',   col: '#6b7a5a', nom: 'le camion-citerne' },
+  camion_explosifs: { kind: 'truck',   col: '#8a3f3f', nom: 'le camion d’explosifs' },
+  fourgon:          { kind: 'armored', col: '#20252e', nom: 'le fourgon blindé' },
+  voiture_kim:      { kind: 'coupe',   col: '#f0c23a', nom: 'la voiture de Kim' },
+  suv_delorme:      { kind: 'suv',     col: '#14161a', nom: 'le SUV de Delorme' }
+};
+
+const _advanceET = Vehicle.prototype.advance;
+Vehicle.prototype.advance = function (G) {
+  if (!this.but) { _advanceET.call(this, G); return; }
+  const prev = this.node;
+  let liens = prev.links.filter(l => l !== this.prev);
+  if (!liens.length) liens = prev.links;
+  if (!liens.length) { _advanceET.call(this, G); return; }
+  let best = liens[0], bd = 1e18;
+  for (const l of liens) {
+    const d = dist2(l.x, l.y, this.but.x, this.but.y);
+    if (d < bd) { bd = d; best = l; }
+  }
+  // une chance sur six de ne pas prendre le meilleur lien : cela suffit à
+  // sortir des triangles où un trajet glouton tournerait indéfiniment
+  this.prev = prev;
+  this.node = chance(0.16) ? pick(liens) : best;
+};
+
+/* --- poser un véhicule de l'histoire, conduit ou garé --- */
+Campagne.prototype.poserVehET = function (cle, x, y, conduit, but) {
+  const G = this.G, d = VEH_HISTOIRE[cle] || VEH_HISTOIRE.berline;
+  let px = x, py = y, node = null;
+  const ns = G.world.nodesNear(x, y, 1000);
+  if (ns.length) {
+    let b = ns[0], bd = 1e18;
+    for (const n of ns) { const q = dist2(n.x, n.y, x, y); if (q < bd) { bd = q; b = n; } }
+    node = b; px = b.x; py = b.y;
+  }
+  const v = new Vehicle(px, py, rand(TAU), d.kind);
+  v.col = d.col; v.fuel = v.fuelMax; v.target = true;
+  v.histoire = cle; v.hp0 = v.hp;
+  if (conduit) {
+    v.driver = 'ai'; v.wasAi = true;
+    v.but = but || null;
+    if (node) { v.node = node; v.prev = node.links.length ? node.links[0] : null; }
+  } else v.driver = null;
+  G.vehicles.push(v);
+  return v;
+};
+/* --- poser un personnage de l'histoire : piéton qui ne s'en va pas --- */
+Campagne.prototype.poserPnjET = function (qui, x, y) {
+  const G = this.G, P = PERSOS[qui] || PERSOS.joueur;
+  const p = new Pedestrian(x, y);
+  p.shirt = P.haut; p.pants = P.bas; p.skin = P.peau; p.cheveux = P.cheveux;
+  p.casquette = P.casquette || P.chapeau || P.bonnet || null;
+  p.parapluie = null; p.chien = null; p.sac = null;
+  p.histoire = qui; p.nom = nomPerso(qui);
+  p.fixe = true; p.px0 = x; p.py0 = y; p.hp = 200; p.sp = 30;
+  p.target = { x: x, y: y };
+  G.peds.push(p);
+  return p;
+};
+/* --- un personnage de l'histoire reste à son poste --- */
+const _newTargetET = Pedestrian.prototype.newTarget;
+Pedestrian.prototype.newTarget = function (Gm) {
+  if (this.fixe) { this.target = { x: this.px0, y: this.py0 }; return; }
+  _newTargetET.call(this, Gm);
+};
+
+/* ======================================================================
+   4. TYPES D'ÉTAPES PROPRES À L'HISTOIRE
+   Le moteur d'origine connaît aller, objet, entrer, tuer, attendre,
+   conduire, bateau, fuir, survivre, poursuite et escorte. Le scénario en
+   demande six de plus, posés par-dessus sans toucher au switch existant :
+     prendre     — monter dans un véhicule nommé (la Comète, le fourgon…)
+     livrer      — l'amener à destination, intact si « soin »
+     passager    — embarquer un personnage et le conduire quelque part
+     suivre      — filer un camion sans se faire voir ni le perdre
+     intercepter — l'arrêter avant qu'il arrive
+     course      — arriver avant une rivale
+     pnj         — parler à un personnage sur place (F)
+   ====================================================================== */
+const ETAPES_ET = ['prendre', 'livrer', 'passager', 'suivre', 'intercepter', 'course', 'pnj'];
+
+/* --- préparation : ce que l'étape fait apparaître --- */
+Campagne.prototype.preparerEtapeET = function (et) {
+  const G = this.G, q = this.q;
+  if (!q) return;
+  // étoiles de recherche imposées par le scénario (les voitures de Brun)
+  if (et.etoiles) {
+    q.etoiles = et.etoiles;
+    for (let i = 0; i < et.etoiles; i++) G.addWanted(200, 'Vous êtes dans le viseur du commissaire Brun');
+  }
+  switch (et.t) {
+    case 'prendre': {
+      q.vehQ = this.poserVehET(et.veh || 'berline', q.cible.x, q.cible.y, false);
+      q.cible = { x: q.vehQ.x, y: q.vehQ.y };
+      G.notify(VEH_HISTOIRE[et.veh] ? VEH_HISTOIRE[et.veh].nom + ' est repérée en jaune' : 'Véhicule repéré en jaune');
+      break;
+    }
+    case 'passager': {
+      const p = this.lieu(et.loc);
+      q.pass = this.poserPnjET(et.qui, p.x + rand(-16, 16), p.y + rand(20, 40));
+      q.dest = this.lieu(et.dest);
+      q.monte = false;
+      q.cible = { x: q.pass.x, y: q.pass.y };
+      break;
+    }
+    case 'suivre': {
+      // le camion passe près du joueur et file vers sa destination
+      const n = G.spawnNode(320, 900) || { x: G.player.x + 400, y: G.player.y };
+      q.vehQ = this.poserVehET(et.veh || 'camion_citerne', n.x, n.y, true, q.cible);
+      q.repere = 0; q.perdu = 0;
+      break;
+    }
+    case 'intercepter': {
+      // il part de loin : on a le temps de se poster sur sa route
+      const ns = G.world.nodesNear(q.cible.x, q.cible.y, 2600)
+        .filter(n => n.links.length && dist2(n.x, n.y, q.cible.x, q.cible.y) > 1100 * 1100);
+      const n = ns.length ? ns[Scene.hash(q.d.titre) % ns.length] : (G.spawnNode(900, 2000) || q.cible);
+      q.vehQ = this.poserVehET(et.veh || 'camion_horizon', n.x, n.y, true, { x: q.cible.x, y: q.cible.y });
+      q.vehQ.hp = Math.round(q.vehQ.hp * 1.4);
+      break;
+    }
+    case 'course': {
+      q.vehQ = this.poserVehET(et.veh || 'voiture_kim', G.player.x + rand(-60, 60), G.player.y + rand(-60, 60),
+        true, { x: q.cible.x, y: q.cible.y });
+      G.ext.flash('TOP DÉPART');
+      break;
+    }
+    case 'pnj': {
+      q.pnj = this.poserPnjET(et.qui, q.cible.x, q.cible.y);
+      break;
+    }
+    case 'poursuite': {
+      // le fuyard du scénario est noir : c'est la voiture de Delorme
+      if (q.veh) { q.veh.col = VEH_HISTOIRE.suv_delorme.col; q.veh.histoire = 'suv_delorme'; }
+      break;
+    }
+  }
+};
+
+/* --- l'étape suivante : préparation, et le chrono qui se recharge --- */
+const _etapeSuivanteET = Campagne.prototype.etapeSuivante;
+Campagne.prototype.etapeSuivante = function () {
+  const avant = this.q ? this.q.i : -1;
+  _etapeSuivanteET.call(this);
+  const q = this.q, G = this.G;
+  if (!q) return;
+  const et = q.d.etapes[q.i];
+  if (!et) return;
+  // chaque objectif rempli redonne la moitié du chrono : les durées du
+  // scénario valent pour un objectif, pas pour une mission entière
+  if (avant >= 0 && q.i > avant && G.mission && G.mission.maxTime > 0 && q.d.temps) {
+    const rab = Math.round(q.d.temps * 0.5);
+    G.mission.time = Math.min(G.mission.maxTime, G.mission.time + rab);
+    G.notify('Objectif atteint : + ' + rab + ' s');
+  }
+  this.preparerEtapeET(et);
+};
+
+/* --- mise à jour des étapes de l'histoire, après celle d'origine --- */
+const _updateET = Campagne.prototype.update;
+Campagne.prototype.update = function (dt, G) {
+  _updateET.call(this, dt, G);
+  if (this.choix) return;
+  const q = this.q, m = G.mission;
+  if (!q || !m || !m.quete) return;
+  const et = q.d.etapes[q.i];
+  if (!et || ETAPES_ET.indexOf(et.t) < 0) return;
+  const P = G.player;
+  let fait = false;
+  switch (et.t) {
+    case 'prendre': {
+      const v = q.vehQ;
+      if (!v || v.dead) { this.echouer('le véhicule est détruit'); return; }
+      q.cible.x = v.x; q.cible.y = v.y; m.target = q.cible;
+      m.desc = et.txt;
+      fait = P.veh === v;
+      break;
+    }
+    case 'livrer': {
+      const v = q.vehQ;
+      if (!v || v.dead) { this.echouer('le véhicule est détruit'); return; }
+      if (et.soin && v.hp < v.hp0 * 0.5) { this.echouer('le véhicule est trop abîmé'); return; }
+      m.target = q.cible;
+      const d = dist(v.x, v.y, q.cible.x, q.cible.y);
+      m.desc = et.txt + '  ' + Math.round(d) + ' m' + (P.veh === v ? '' : '  (reprenez le volant)');
+      fait = P.veh === v && d < (et.r || 100);
+      break;
+    }
+    case 'passager': {
+      const p = q.pass;
+      if (!p || p.dead) { this.echouer('votre passager n’a pas survécu'); return; }
+      if (!q.monte) {
+        q.cible.x = p.x; q.cible.y = p.y; m.target = q.cible;
+        m.desc = et.txt + '  (approchez-vous en véhicule)';
+        if (P.veh && !(P.veh instanceof Boat) && dist(P.x, P.y, p.x, p.y) < 74) {
+          q.monte = true; q.vehPass = P.veh; q.vehPass.hp0 = q.vehPass.hp;
+          const i = G.peds.indexOf(p);
+          if (i >= 0) G.peds.splice(i, 1);
+          q.cible = { x: q.dest.x, y: q.dest.y };
+          G.notify(p.nom + ' monte à bord');
+          G.bip(660, 0.12);
+        }
+      } else {
+        m.target = q.cible;
+        const v = q.vehPass;
+        if (!v || v.dead) { this.echouer('le véhicule a été détruit avec votre passager'); return; }
+        if (et.soin && v.hp < v.hp0 * 0.5) { this.echouer('votre passager ne veut plus de cette voiture'); return; }
+        const d = dist(v.x, v.y, q.cible.x, q.cible.y);
+        m.desc = et.txt + '  ' + Math.round(d) + ' m' + (P.veh === v ? '' : '  (ne laissez pas votre passager)');
+        fait = P.veh === v && d < (et.r || 100);
+        if (fait) {                                  // il descend sur place
+          p.x = q.cible.x + rand(-20, 20); p.y = q.cible.y + rand(20, 40);
+          p.px0 = p.x; p.py0 = p.y; p.target = { x: p.x, y: p.y };
+          if (G.peds.indexOf(p) < 0) G.peds.push(p);
+        }
+      }
+      break;
+    }
+    case 'suivre': {
+      const v = q.vehQ;
+      if (!v || v.dead) { this.echouer('le camion a été détruit : plus rien à suivre'); return; }
+      q.cible.x = v.x; q.cible.y = v.y; m.target = q.cible;
+      const d = dist(P.x, P.y, v.x, v.y);
+      if (d < 100) q.repere = (q.repere || 0) + dt;
+      else q.repere = Math.max(0, (q.repere || 0) - dt * 0.6);
+      if (q.repere > 3.2) { this.echouer('le chauffeur vous a repéré'); return; }
+      if (d > 820) {
+        q.perdu = (q.perdu || 0) + dt;
+        if (q.perdu > 7) { this.echouer('vous avez perdu le camion'); return; }
+      } else q.perdu = 0;
+      m.desc = et.txt + '  ' + Math.round(d) + ' m' +
+        (d < 100 ? '  — TROP PRÈS' : d > 820 ? '  — TROP LOIN' : '');
+      fait = dist(v.x, v.y, v.but.x, v.but.y) < 170;
+      if (fait) { v.but = null; v.driver = null; v.throttle = 0; }
+      break;
+    }
+    case 'intercepter': {
+      const v = q.vehQ;
+      if (!v) { fait = true; break; }
+      q.cible.x = v.x; q.cible.y = v.y; m.target = q.cible;
+      const reste = dist(v.x, v.y, v.but.x, v.but.y);
+      m.desc = et.txt + '  ' + Math.round(reste) + ' m avant son but';
+      if (!v.dead && reste < 150) { this.echouer('le camion est passé'); return; }
+      fait = v.dead || (Math.abs(v.speed) < 34 && dist(P.x, P.y, v.x, v.y) < 150);
+      // arrêté : le chauffeur descend, le volant est libre pour la suite
+      if (fait && !v.dead) { v.driver = null; v.but = null; v.throttle = 0; }
+      break;
+    }
+    case 'course': {
+      const v = q.vehQ;
+      m.target = q.cible;
+      const moi = dist(P.x, P.y, q.cible.x, q.cible.y);
+      const elle = v && !v.dead ? dist(v.x, v.y, q.cible.x, q.cible.y) : -1;
+      m.desc = et.txt + '  vous ' + Math.round(moi) + ' m · elle ' + (elle < 0 ? '—' : Math.round(elle) + ' m');
+      if (elle >= 0 && elle < 130) { this.echouer('votre adversaire est arrivée la première'); return; }
+      fait = moi < (et.r || 110);
+      break;
+    }
+    case 'pnj': {
+      const n = q.pnj;
+      if (n && !n.dead) { q.cible.x = n.x; q.cible.y = n.y; }
+      m.target = q.cible;
+      m.desc = et.txt;
+      fait = false;                                   // validé par la touche F
+      break;
+    }
+  }
+  if (fait) this.etapeSuivante();
+};
+
+/* --- touche F : parler au personnage d'une étape « pnj » --- */
+Campagne.prototype.validerPnjET = function (G) {
+  const q = this.q;
+  if (!q) return false;
+  const et = q.d.etapes[q.i];
+  if (!et || et.t !== 'pnj') return false;
+  if (dist(G.player.x, G.player.y, q.cible.x, q.cible.y) > 82) return false;
+  G.bip(740, 0.14);
+  this.etapeSuivante();
+  return true;
+};
+
+/* --- nettoyage : on ne laisse ni figurant ni voiture marquée --- */
+const _nettoyerET = Campagne.prototype.nettoyer;
+Campagne.prototype.nettoyer = function () {
+  const G = this.G, q = this.q;
+  if (q) {
+    for (const p of [q.pnj, q.pass]) {
+      if (!p) continue;
+      const i = G.peds.indexOf(p);
+      if (i >= 0) G.peds.splice(i, 1);
+    }
+    if (q.vehQ) { q.vehQ.but = null; q.vehQ.target = false; }
+    if (q.etoiles) G.clearWanted();
+  }
+  _nettoyerET.call(this);
+};
+
+/* ======================================================================
+   5. RÉCOMPENSES
+   Le scénario promet de l'argent (payé par le moteur), mais aussi une
+   arme, un véhicule et surtout des informations : ce sont elles qui font
+   avancer l'enquête, et elles s'inscrivent au journal.
+   ====================================================================== */
+Campagne.prototype.recompenserET = function (d, q) {
+  const G = this.G, P = G.player, r = d.recompense;
+  if (!this.indices) this.indices = [];
+  if (!r) return;
+  if (r.arme && !P.owned[r.arme]) {
+    P.owned[r.arme] = true;
+    P.ammo[r.arme] = (P.ammo[r.arme] || 0) + 60;
+    G.notify('Arme obtenue : ' + (WEAPONS[r.arme] ? WEAPONS[r.arme].n : r.arme));
+  }
+  if (r.veh) {
+    const def = VEH_HISTOIRE[r.veh] || VEH_HISTOIRE.berline;
+    let v = q && q.vehQ && q.vehQ.histoire === r.veh && !q.vehQ.dead ? q.vehQ : null;
+    if (!v) {
+      const n = G.spawnNode(60, 700) || { x: P.x + 60, y: P.y + 60 };
+      v = new Vehicle(n.x, n.y, rand(TAU), def.kind);
+      v.col = def.col; v.histoire = r.veh;
+      G.vehicles.push(v);
+    }
+    v.owned = true; v.permanent = true; v.target = false; v.but = null;
+    v.fuel = v.fuelMax; v.dead = false;
+    G.favVeh = { kind: def.kind, col: v.col, upg: {} };
+    this.drap['veh_' + r.veh] = true;
+    G.notify(def.nom + ' est à vous — enregistrée comme véhicule favori');
+  }
+  if (r.info) {
+    this.indices.push({ n: d.n, t: r.info });
+    if (this.indices.length > 40) this.indices.shift();
+    G.ext.contacts.noter(G, 'Indice — ' + r.info);
+    G.ext.flash('NOUVEL INDICE');
+  }
+};
+
+const _reussirET = Campagne.prototype.reussir;
+Campagne.prototype.reussir = function () {
+  const d = this.q ? this.q.d : null, q = this.q;
+  _reussirET.call(this);
+  if (d) this.recompenserET(d, q);
+};
+
+/* --- l'heure et le temps imposés par la mission --- */
+const _demarrerET = Campagne.prototype.demarrer;
+Campagne.prototype.demarrer = function (d) {
+  const G = this.G;
+  if (d.nuit && G.dayNight.dark < 0.7) {
+    G.dayNight.t = 22.4 / 24; G.dayNight.compute();
+    G.notify('La nuit tombe sur Liberty Lake');
+  } else if (!d.nuit && G.dayNight.dark > 0.7) {
+    G.dayNight.t = 9.5 / 24; G.dayNight.compute();
+    G.notify('Le jour se lève');
+  }
+  if (d.tempete) {
+    G.weather.etat = 'orage'; G.weather.tRest = 900;
+    G.notify('La tempête est sur la ville');
+  }
+  _demarrerET.call(this, d);
+};
+
+/* ======================================================================
+   6. LES MISSIONS SECONDAIRES
+   Dix petites histoires, disponibles dès que la mission principale qui
+   les débloque est accomplie. Elles passent par le même moteur : on leur
+   fabrique une définition de mission, le reste suit.
+   ====================================================================== */
+const SECONDAIRES = [
+  { id: 'S1', titre: 'Biscuit a fugué', donneur: 'lopez', poste: 'maison_lopez',
+    apres: 1, gain: 150, temps: 90,
+    journal: 'Retrouve Biscuit près de la casse et ramène-le à Mme Lopez.',
+    intro: [S('banlieue', ['lopez', 'joueur'], 'MME LOPEZ', 'Mon chien Biscuit s’est encore sauvé ! Il adore la casse, il croit que les pneus sont des jouets. Tu veux bien le chercher ?')],
+    etapes: [{ t: 'objet', loc: 'casse', txt: 'Retrouvez Biscuit près de la casse.' },
+             { t: 'aller', loc: 'maison_lopez', r: 85, txt: 'Ramenez Biscuit chez Mme Lopez.' }],
+    outro: [S('banlieue', ['lopez', 'joueur'], 'MME LOPEZ', 'Il est rentré ! … Dites, ce SUV noir, il tournait dans la rue une semaine avant l’incendie. Je l’ai dit à personne.')],
+    recompense: { info: 'Mme Lopez a vu le SUV noir une semaine avant l’incendie.' } },
+
+  { id: 'S2', titre: 'Course de nuit', donneur: 'kim', poste: 'club',
+    apres: 7, gain: 500, temps: 120, nuit: true,
+    journal: 'Arrive au pont de la banlieue avant Kim.',
+    intro: [S('rue', ['kim', 'joueur'], 'KIM', 'Tiens, Léo Marchand. On disait que tu avais rangé tes gants. Une dernière course, du centre jusqu’au pont de la banlieue ? Pour le plaisir.')],
+    etapes: [{ t: 'course', loc: 'pont', r: 115, veh: 'voiture_kim', txt: 'Arrivez au pont de la banlieue avant Kim.' }],
+    outro: [S('rue', ['kim', 'joueur'], 'KIM', 'Garde la Flèche, elle est trop nerveuse pour moi. Et fais attention : les Corbeaux recrutent leurs chauffeurs dans les courses de rue.')],
+    recompense: { veh: 'la_fleche', info: 'Les Corbeaux recrutent leurs chauffeurs dans les courses de rue.' } },
+
+  { id: 'S3', titre: 'La radio pirate', donneur: 'sly', poste: 'studio',
+    apres: 10, gain: 300, temps: 150, nuit: true,
+    journal: 'Récupère l’antenne de Sly et livre-la à son studio.',
+    intro: [S('rue', ['sly', 'joueur'], 'SLY', 'Yo. Liberty FM, la seule radio qui dit la vérité sur Delorme. Enfin, qui la disait : ses gardes m’ont volé mon antenne. Tu me la ramènes ?')],
+    etapes: [{ t: 'objet', loc: 'chantier', txt: 'Récupérez l’antenne sur le chantier d’Horizon.' },
+             { t: 'aller', loc: 'studio', r: 85, txt: 'Livrez l’antenne au studio de Sly.' }],
+    outro: [S('radio', ['sly', 'joueur'], 'SLY', 'On est de retour à l’antenne ! Le jour où tu as une vérité à dire, appelle-moi. N’importe quelle heure.')],
+    recompense: { info: 'Liberty FM réémet : vous pouvez parler à toute la ville.' } },
+
+  { id: 'S4', titre: 'L’armurier nerveux', donneur: 'bernard', poste: 'armurerie',
+    apres: 11, gain: 0, temps: 120,
+    journal: 'Conduis Bernard à la banque avant le passage des Corbeaux.',
+    intro: [S('rue', ['bernard', 'joueur'], 'BERNARD', 'Les Corbeaux me prennent de l’argent tous les mois. Aujourd’hui, je veux déposer ma caisse à la banque avant leur passage. Tu m’emmènes ? Vite ?')],
+    etapes: [{ t: 'passager', qui: 'bernard', loc: 'armurerie', dest: 'banque', r: 95, txt: 'Conduisez Bernard à la banque.' }],
+    outro: [S('rue', ['bernard', 'joueur'], 'BERNARD', 'Prenez ce fusil, et vingt pour cent sur tout, à vie. Je dors mieux depuis ce matin.')],
+    recompense: { arme: 'shotgun', info: 'Les Corbeaux rackettent tous les commerces de la ville.' } },
+
+  { id: 'S5', titre: 'Les médicaments', donneur: 'sow', poste: 'clinique_campagne',
+    apres: 13, gain: 200, temps: 200,
+    journal: 'Apporte les médicaments de la ville à la clinique de campagne.',
+    intro: [S('ferme', ['sow', 'joueur'], 'DR SOW', 'Depuis que l’eau des puits est sale, les enfants ont mal au ventre. J’ai besoin de médicaments de la clinique de la ville avant ce soir.')],
+    etapes: [{ t: 'objet', loc: 'clinique_ville', txt: 'Prenez les médicaments à la clinique de la ville.' },
+             { t: 'aller', loc: 'clinique_campagne', r: 95, txt: 'Livrez-les à la clinique de campagne.' }],
+    outro: [S('ferme', ['sow', 'joueur'], 'DR SOW', 'Ils iront mieux. Tenez : mon rapport, signé. L’eau est polluée par de la boue de chantier.')],
+    recompense: { info: 'Rapport médical signé : l’eau est polluée par de la boue de chantier.' } },
+
+  { id: 'S6', titre: 'La station fantôme', donneur: 'toto', poste: 'parc',
+    apres: 14, gain: 400, temps: 150, nuit: true,
+    journal: 'Va voir ce qui brille la nuit dans la vieille station-service.',
+    intro: [S('rue', ['toto', 'joueur'], 'TOTO', 'Frérot, on dit qu’il y a des lumières la nuit dans la vieille station-service de la campagne. Des fantômes. Ou des gens qui ont faim. J’espère des fantômes.')],
+    etapes: [{ t: 'aller', loc: 'station_service', r: 95, txt: 'Approchez de la station-service abandonnée.' },
+             { t: 'attendre', loc: 'ici', s: 12, r: 140, txt: 'Observez sans vous montrer.' },
+             { t: 'objet', loc: 'ici', txt: 'Emportez le registre de livraisons.' }],
+    outro: [S('rue', ['joueur'], null, 'Pas de fantômes : des barils de boue d’Horizon, et un registre signé Kessler.')],
+    recompense: { info: 'Registre de livraisons signé par Kessler.' } },
+
+  { id: 'S7', titre: 'Le trésor de 79', donneur: 'mamiejo', poste: 'ferme_aubry',
+    apres: 16, gain: 0, temps: 120,
+    journal: 'Cherche la boîte en fer sous le pommier de la ferme Delorme.',
+    intro: [S('ferme', ['mamiejo', 'joueur'], 'MAMIE JO', 'Quand on était petits, Victor et moi, on avait caché une boîte en fer sous le vieux pommier de sa ferme. L’eau a tout pris, sauf l’arbre. Va voir, le gamin.')],
+    etapes: [{ t: 'aller', loc: 'pommier', r: 85, txt: 'Trouvez les ruines de la ferme Delorme, au bord du lac.' },
+             { t: 'objet', loc: 'ici', txt: 'Déterrez la boîte en fer sous le pommier.' }],
+    outro: [S('moulin', ['joueur'], null, 'Dans la boîte : un dessin d’enfant, « Ma maison », signé Victor, 9 ans. Et une lettre au maire qui n’a jamais été envoyée.')],
+    recompense: { info: 'Le dessin d’enfance de Victor Delorme et sa lettre au maire.' } },
+
+  { id: 'S8', titre: 'Le fantôme du lac', donneur: 'toto', poste: 'parc',
+    apres: 18, gain: 300, temps: 150, nuit: true,
+    journal: 'Observe les lumières sous l’eau, près du barrage.',
+    intro: [S('rue', ['toto', 'joueur'], 'TOTO', 'Les pêcheurs disent qu’il y a des lumières sous l’eau, la nuit, près du barrage. Frérot, si c’est un monstre, je déménage.')],
+    etapes: [{ t: 'aller', loc: 'rive_barrage', r: 95, txt: 'Gagnez la rive du lac, près du barrage.' },
+             { t: 'attendre', loc: 'ici', s: 14, r: 150, txt: 'Observez les lumières sous l’eau.' }],
+    outro: [S('barrage', ['joueur'], null, 'Des plongeurs d’Horizon. Ils marquent des points précis sur les vannes. Pas un monstre, mais pas rassurant non plus.')],
+    recompense: { info: 'Les plongeurs d’Horizon marquent les points faibles des vannes.' } },
+
+  { id: 'S9', titre: 'Les filets d’Okafor', donneur: 'okafor', poste: 'capitainerie',
+    apres: 18, gain: 500, temps: 180,
+    journal: 'Ramène le camion de pêche d’Okafor de la casse au port.',
+    intro: [S('capitainerie', ['okafor', 'joueur'], 'OKAFOR', 'Mon camion de pêche… volé. Par des gamins en noir. … Les Corbeaux. Il est à la casse de la banlieue. Ramène-le.')],
+    etapes: [{ t: 'prendre', loc: 'casse', veh: 'camion_peche', txt: 'Le camion de pêche est à la casse : reprenez-le.' },
+             { t: 'livrer', loc: 'capitainerie', r: 110, txt: 'Ramenez-le à la capitainerie.' }],
+    outro: [S('capitainerie', ['okafor', 'joueur'], 'OKAFOR', 'Garde-le, petit. Moi, j’ai mon bateau.')],
+    recompense: { veh: 'camion_peche', info: 'Okafor vous fait confiance.' } },
+
+  { id: 'S10', titre: 'Toto Burger', donneur: 'toto', poste: 'parc',
+    apres: 19, gain: 0, temps: 150,
+    journal: 'Conduis le food-truck de Toto du port jusqu’au parc.',
+    intro: [S('docks', ['toto', 'joueur'], 'TOTO', 'Frérot. Il y a une vente aux enchères au port. Un food-truck. MON food-truck. J’ai les sous, mais pas le permis poids lourd. Tu le conduis jusqu’au parc ?')],
+    etapes: [{ t: 'prendre', loc: 'quai_encheres', veh: 'food_truck', txt: 'Prenez le food-truck au quai des enchères.' },
+             { t: 'livrer', loc: 'parc', r: 110, soin: true, txt: 'Conduisez-le au parc sans l’abîmer.' }],
+    outro: [S('parc', ['toto', 'joueur'], 'TOTO', 'TOTO BURGER EST OUVERT ! Le premier est pour toi, frérot. … C’est les oignons, je pleure pas.')],
+    recompense: { veh: 'food_truck', info: 'Toto Burger s’installe au parc : on y mange à volonté.' } }
+];
+
+class Secondaires {
+  constructor(camp) {
+    this.camp = camp;
+    this.faites = [];
+    this.postes = [];
+  }
+  def(id) { return SECONDAIRES.find(s => s.id === id) || null; }
+  faite(id) { return this.faites.indexOf(id) >= 0; }
+  /* une secondaire est ouverte quand la principale qui la débloque est faite */
+  ouverte(s) {
+    return !this.faite(s.id) && this.camp.faites.indexOf(s.apres) >= 0;
+  }
+  /* les donneurs attendent à leur poste, repérés sur la carte */
+  placer() {
+    const camp = this.camp, G = camp.G;
+    this.postes.length = 0;
+    for (const s of SECONDAIRES) {
+      if (!this.ouverte(s)) continue;
+      const p = camp.lieu(s.poste);
+      let x = p.x + 34, y = p.y + 30;
+      if (G.world.deadlyWater(x, y) || G.world.buildingAt(x, y)) { x = p.x - 36; y = p.y + 44; }
+      this.postes.push({ id: s.id, qui: s.donneur, titre: s.titre, x: x, y: y });
+    }
+  }
+  /* le donneur à portée de parole, s'il y en a un */
+  proche(G) {
+    if (G.inside || G.player.veh || this.camp.q) return null;
+    for (const p of this.postes)
+      if (dist2(p.x, p.y, G.player.x, G.player.y) < 78 * 78) return p;
+    return null;
+  }
+  parler(G) {
+    const p = this.proche(G);
+    if (!p) return false;
+    const s = this.def(p.id);
+    if (!s) return false;
+    this.camp.lancer(this.mission(s));
+    return true;
+  }
+  /* définition de mission fabriquée pour le moteur principal */
+  mission(s) {
+    const d = this.camp.def();
+    return {
+      n: s.id, acte: d ? d.acte : 5, titre: s.titre, donneur: s.donneur,
+      gain: s.gain, temps: s.temps, nuit: s.nuit, journal: s.journal,
+      etapes: s.etapes, intro: s.intro, outro: s.outro,
+      recompense: s.recompense, sec: true
+    };
+  }
+  terminer(id) {
+    if (!this.faite(id)) this.faites.push(id);
+    if (id === 'S3') this.camp.drap.radio = true;     // débloque la fin « Aveu »
+    if (id === 'S6') this.camp.drap.kessler = true;   // Kessler sera condamné
+    if (id === 'S7') this.camp.drap.dessin = true;    // le dessin d'enfance
+    this.placer();
+  }
+  serialiser() { return { faites: this.faites }; }
+  restaurer(o) {
+    if (o && Array.isArray(o.faites)) this.faites = o.faites;
+    this.placer();
+  }
+}
+/* création paresseuse : la campagne existe avant ce module */
+Campagne.prototype.secs = function () {
+  if (!this._sec) { this._sec = new Secondaires(this); this._sec.placer(); }
+  return this._sec;
+};
+
+/* ======================================================================
+   7. LES DONNEURS DE MISSION
+   Le moteur d'origine n'avait qu'un Recruteur, planté par acte. Ici, dix
+   personnages donnent les missions : certains attendent à leur poste,
+   d'autres appellent au téléphone — et un appel se prend n'importe où.
+   ====================================================================== */
+const POSTE_MISSION = {
+  1: 'garage', 2: 'garage', 3: 'garage', 6: 'commissariat',
+  8: 'club', 11: 'club', 13: 'parc',
+  14: 'ferme_aubry', 16: 'ferme_aubry', 17: 'ferme_aubry',
+  21: 'capitainerie', 22: 'capitainerie', 28: 'dernier_quai'
+};
+
+Campagne.prototype.placerRecruteur = function () {
+  const G = this.G, W = G.world, d = this.def();
+  this.tel = false;
+  if (!d) { this.rec.x = -99999; this.rec.y = -99999; this.rec.b = null; return; }
+  this.rec.qui = d.donneur || 'marco';
+  const poste = POSTE_MISSION[d.n];
+  if (!poste) {                       // mission donnée par téléphone
+    this.tel = true;
+    this.rec.x = -99999; this.rec.y = -99999; this.rec.b = null;
+    if (G.hud) G.notify('Appel de ' + nomPerso(this.rec.qui) + ' — F pour répondre');
+    return;
+  }
+  const p = this.lieu(poste);
+  this.rec.x = p.x + rand(-24, 24); this.rec.y = p.y + rand(26, 52);
+  this.rec.b = p.b || null;
+  if (W.deadlyWater(this.rec.x, this.rec.y) || W.buildingAt(this.rec.x, this.rec.y)) {
+    for (let i = 0; i < 48; i++) {
+      const a = i * 0.72, r = 40 + i * 12;
+      const x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
+      if (!W.deadlyWater(x, y) && !W.buildingAt(x, y)) { this.rec.x = x; this.rec.y = y; break; }
+    }
+  }
+};
+
+/* --- portée de parole : à son poste, ou au téléphone de n'importe où --- */
+Campagne.prototype.majRecruteur = function (G) {
+  const P = G.player;
+  if (this.q || G.inside || !this.def()) { this.proche = false; return; }
+  if (this.tel) {
+    // On décroche avec F, de n'importe où : il faut donc céder la touche à
+    // tout ce qui est déjà sous la main, sinon l'appel bloquerait le reste.
+    const E = G.ext;
+    const porte = !P.veh && G.nearDoor(60);
+    const occupe = (E.invite && E.invite.t > 0) || (E.contacts && E.contacts.parle) ||
+      (E.explo && E.explo.graffProche) || !!this.secs().proche(G) ||
+      !!(porte && !porte.planque && (porte.gtype === 'appart' || porte.special === 'appart'));
+    this.proche = !occupe;
+    if (this.proche) this.rec.vu = true;
+    return;
+  }
+  this.proche = !P.veh && dist2(this.rec.x, this.rec.y, P.x, P.y) < 80 * 80;
+  if (this.proche) this.rec.vu = true;
+};
+
+/* --- silhouette d'un personnage posté : palette propre et nom au-dessus --- */
+Campagne.prototype.dessinerPosteET = function (g, G, qui, x, y, titre, col) {
+  const A = PERSOS[qui] || PERSOS.joueur;
+  g.save();
+  g.translate(x, y);
+  g.fillStyle = 'rgba(6,9,14,0.3)';
+  g.beginPath(); g.ellipse(0, 3, 8, 5, 0, 0, TAU); g.fill();
+  g.fillStyle = A.bas; g.fillRect(-4, 1, 8, 7);
+  g.fillStyle = A.haut; rr(g, -7, -7, 15, 13, 5); g.fill();
+  g.fillStyle = A.peau;
+  g.beginPath(); g.arc(0, -8, 5.6, 0, TAU); g.fill();
+  g.fillStyle = A.cheveux; rr(g, -5.6, -13.5, 11, 5, 3); g.fill();
+  const coiffe = A.chapeau || A.casquette || A.bonnet || A.casque;
+  if (coiffe) { g.fillStyle = coiffe; rr(g, -7, -13.5, 14, 5, 2); g.fill(); }
+  const puls = 0.5 + 0.3 * Math.sin(G.time * 2.6);
+  g.globalAlpha = puls;
+  g.fillStyle = col;
+  g.beginPath(); g.moveTo(0, -22); g.lineTo(5, -30); g.lineTo(-5, -30); g.closePath(); g.fill();
+  g.globalAlpha = 1;
+  g.font = '700 10px ' + ART.hud.police; g.textAlign = 'center';
+  g.fillStyle = col;
+  g.fillText(nomPerso(qui).toUpperCase(), 0, -36);
+  if (titre) {
+    g.font = '600 9px ' + ART.hud.police;
+    g.fillStyle = '#cfdcea';
+    g.fillText(titre, 0, -47);
+  }
+  g.textAlign = 'left';
+  g.restore();
+};
+
+/* --- rendu : le donneur, les secondaires, et le personnage d'une étape --- */
+Campagne.prototype.draw = function (g, G, v) {
+  const dedans = (x, y) => x > v.x - 60 && x < v.x + v.w + 60 && y > v.y - 80 && y < v.y + v.h + 60;
+  const d = this.def();
+  if (!this.q && d && !this.tel && dedans(this.rec.x, this.rec.y))
+    this.dessinerPosteET(g, G, this.rec.qui, this.rec.x, this.rec.y,
+      'Mission ' + d.n + ' · ' + d.titre, '#ffd45e');
+  if (!this.q)
+    for (const p of this.secs().postes)
+      if (dedans(p.x, p.y)) this.dessinerPosteET(g, G, p.qui, p.x, p.y, p.titre, '#7fd3ff');
+  // le personnage attendu par une étape « pnj » : repère vert
+  const q = this.q;
+  if (q && q.pnj && !q.pnj.dead) {
+    const et = q.d.etapes[q.i];
+    if (et && et.t === 'pnj' && dedans(q.pnj.x, q.pnj.y)) {
+      g.save();
+      g.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 3);
+      g.fillStyle = '#7ae582';
+      g.beginPath(); g.moveTo(q.pnj.x, q.pnj.y - 26); g.lineTo(q.pnj.x + 5, q.pnj.y - 34);
+      g.lineTo(q.pnj.x - 5, q.pnj.y - 34); g.closePath(); g.fill();
+      g.globalAlpha = 1;
+      g.font = '700 10px ' + ART.hud.police; g.textAlign = 'center';
+      g.fillStyle = '#7ae582';
+      g.fillText(q.pnj.nom.toUpperCase(), q.pnj.x, q.pnj.y - 40);
+      g.textAlign = 'left';
+      g.restore();
+    }
+  }
+};
+
+/* --- touche F : parler au personnage d'une étape, ou prendre une secondaire --- */
+const _interagirET = Extensions.prototype.interagir;
+Extensions.prototype.interagir = function () {
+  const G = this.G, camp = this.camp;
+  if (camp) {
+    if (camp.validerPnjET(G)) return;
+    if (!camp.q && camp.secs().parler(G)) return;
+  }
+  _interagirET.call(this);
+};
+
+/* --- infobulles : appel, poste, secondaire, personnage d'étape --- */
+const _majTipET = Extensions.prototype.majTip;
+Extensions.prototype.majTip = function () {
+  _majTipET.call(this);
+  const G = this.G, camp = this.camp;
+  if (!camp || G.inside) return;
+  const q = camp.q;
+  if (q) {
+    const et = q.d.etapes[q.i];
+    if (et && et.t === 'pnj' && dist(G.player.x, G.player.y, q.cible.x, q.cible.y) < 82)
+      G.tip = 'F — parler à ' + (q.pnj ? q.pnj.nom : '');
+    return;
+  }
+  const d = camp.def();
+  if (camp.proche && d)
+    G.tip = camp.tel
+      ? 'F — répondre à l’appel de ' + nomPerso(d.donneur) + ' (mission ' + d.n + ')'
+      : 'F — parler à ' + nomPerso(camp.rec.qui) + ' (mission ' + d.n + ' : ' + d.titre + ')';
+  const p = camp.secs().proche(G);
+  if (p) G.tip = 'F — parler à ' + nomPerso(p.qui) + ' (« ' + p.titre + ' »)';
+};
+
+/* --- carte : le donneur et les missions secondaires ouvertes --- */
+const _drawCarteET = Extensions.prototype.drawCarte;
+Extensions.prototype.drawCarte = function (g, Gm, mx, my, k, span, plein) {
+  _drawCarteET.call(this, g, Gm, mx, my, k, span, plein);
+  const camp = this.camp;
+  if (!camp) return;
+  const P = Gm.player;
+  const dedans = (x, y) => plein || (Math.abs(x - P.x) < span / 2 && Math.abs(y - P.y) < span / 2);
+  if (!camp.q)
+    for (const p of camp.secs().postes) {
+      if (!dedans(p.x, p.y)) continue;
+      g.fillStyle = 'rgba(0,0,0,.5)';
+      g.beginPath(); g.arc(mx(p.x), my(p.y), 7, 0, TAU); g.fill();
+      drawIcon(g, 'quete', mx(p.x), my(p.y), 9, '#7fd3ff');
+    }
+};
+
+/* ======================================================================
+   8. CHOIX, VARIANTES ET LES TROIS FINS
+   Deux choix moraux pèsent sur l'acte V — qui donne la mission du convoi,
+   qui ferme les vannes — puis le dernier quai en ouvre trois.
+   ====================================================================== */
+const Q_ET = n => QUETES.find(q => q.n === n);
+
+/* --- état d'origine des missions à variante : relu à chaque application,
+   pour qu'une nouvelle partie ne garde pas la variante de la précédente --- */
+const VARIANTE_BASE = {};
+for (const n of [25, 26]) {
+  const q = Q_ET(n);
+  if (q) VARIANTE_BASE[n] = { donneur: q.donneur, temps: q.temps, intro: q.intro, outro: q.outro, qui: q.etapes[0].qui };
+}
+
+/* --- la variante « seul » du convoi : Inès remplace Mamie Jo --- */
+Campagne.prototype.appliquerVariantes = function () {
+  for (const n in VARIANTE_BASE) {           // on repart toujours du texte d'origine
+    const q = Q_ET(+n), b = VARIANTE_BASE[n];
+    if (!q) continue;
+    q.donneur = b.donneur; q.temps = b.temps; q.intro = b.intro; q.outro = b.outro;
+    q.etapes[0].qui = b.qui;
+  }
+  if (this.drap.garderArgent) {
+    const q = Q_ET(25);
+    if (q) {
+      q.donneur = 'ines'; q.temps = 110;
+      q.intro = [S('tempete', ['ines'], 'INÈS', 'Un camion d’explosifs roule vers le barrage. Personne ne bloque la route. Tu es seul, Marchand. Fonce.')];
+    }
+  }
+  if (this.drap.livrerMarco) {
+    const q = Q_ET(26);
+    if (q) {
+      q.donneur = 'okafor';
+      q.intro = [S('tempete', ['okafor', 'joueur'], 'OKAFOR', 'Les vannes, je connais. J’ai trente ans de ce barrage dans les mains. … Emmène-moi là-haut, petit.')];
+      q.etapes[0].qui = 'okafor';
+      q.outro = [S('vannes', ['okafor'], 'OKAFOR', '… Vanne fermée.'),
+                 S('vannes', ['joueur'], 'LÉO', 'Capitaine ? Vous êtes blessé ?'),
+                 S('vannes', ['okafor'], 'OKAFOR', 'La jambe. Rien de grave. … Le lac a voulu me garder. Je lui ai dit non.'),
+                 S('vannes', ['joueur'], 'LÉO', 'On vient vous chercher.'),
+                 S('vannes', ['okafor'], 'OKAFOR', 'Non, petit. Va chercher Delorme.')];
+    }
+  }
+};
+
+/* --- le choix final : l'aveu demande une antenne de radio --- */
+const _poserChoixET = Campagne.prototype.poserChoix;
+Campagne.prototype.poserChoix = function (d) {
+  if (d.n !== 28) { _poserChoixET.call(this, d); return; }
+  const radio = !!this.drap.radio;
+  const a = [d.choix.a[0], d.choix.a[1]];
+  if (radio) a.push(d.choix.a[2]);
+  let q = d.choix.q;
+  if (this.drap.dessin)
+    q = 'Vous sortez le dessin d’enfant. « … Où avez-vous trouvé ça ? »  —  ' + q;
+  this.choix = {
+    d: d, q: q, a: a, t: 40,
+    gris: radio ? null : ['Avec la vérité. — il te faudrait un moyen de parler à toute la ville']
+  };
+  this.G.notify(radio ? 'Choix final : 1, 2 ou 3' : 'Choix final : 1 ou 2');
+};
+
+/* --- les effets durables des trois choix --- */
+const _appliquerEffetET = Campagne.prototype.appliquerEffet;
+Campagne.prototype.appliquerEffet = function (effet, d) {
+  const G = this.G, P = G.player, fin = G.ext.fin;
+  switch (effet) {
+    case 'rendreArgent':
+      this.drap.rendreArgent = true;
+      G.notify('L’argent repart dans les fermes : aucune famille ne vendra');
+      this.recompenserET({ n: d.n, recompense: { veh: 'vieille_bique', info: 'Les fermiers gardent leurs terres. Mamie Jo vous laisse la Vieille Bique.' } }, null);
+      this.appliquerVariantes();
+      return;
+    case 'garderArgent':
+      this.drap.garderArgent = true;
+      fin.encaisser(G, 20000, 'Caisse noire d’Horizon');
+      G.notify('20 000 $ pour l’avocat de Paul — Mamie Jo ne vous parle plus');
+      G.ext.contacts.noter(G, 'Mamie Jo ne vous adresse plus la parole.');
+      this.appliquerVariantes();
+      return;
+    case 'pardonMarco':
+      this.drap.pardonMarco = true;
+      G.notify('Marco vous donne le vrai code : 1979');
+      this.appliquerVariantes();
+      return;
+    case 'livrerMarco':
+      this.drap.livrerMarco = true;
+      G.notify('Marco témoignera contre Delorme — Inès vous fait confiance');
+      G.ext.contacts.noter(G, 'Marco Vidal est entre les mains d’Inès Cordier.');
+      this.appliquerVariantes();
+      return;
+    case 'finJustice': this.epilogue = 'justice'; return;
+    case 'finPrix':
+      this.epilogue = 'prix';
+      fin.encaisser(G, 100000, 'Le silence de Delorme');
+      this.drap.policeSevere = true;
+      return;
+    case 'finAveu': this.epilogue = 'aveu'; return;
+  }
+  _appliquerEffetET.call(this, effet, d);
+};
+
+/* --- les épilogues : trois fins, et leurs variantes selon les choix --- */
+Campagne.prototype.finCampagne = function () {
+  const G = this.G;
+  if (!this.epilogue) this.epilogue = 'justice';
+  this.drap.termine = true;
+  const v = [];
+  const ch1 = this.drap.rendreArgent ? 'A' : this.drap.garderArgent ? 'B' : null;
+  const ch2 = this.drap.pardonMarco ? 'A' : this.drap.livrerMarco ? 'B' : null;
+  let plans;
+  if (this.epilogue === 'justice') {
+    plans = [
+      S('quai', ['ines', 'delorme'], 'INÈS', 'Victor Delorme, vous êtes en état d’arrestation.'),
+      S('quai', ['delorme'], 'DELORME', 'Mes avocats seront là avant le lever du soleil, lieutenante.'),
+      S('quai', ['ines'], 'INÈS', 'Les miens aussi. Ils s’appellent « les faits ».'),
+      S('garage', ['joueur'], null, 'ÉPILOGUE — JUSTICE : le procès dure trois mois. Delorme est condamné, Paul est libéré le jour du verdict.'),
+      S('garage', ['paul', 'joueur'], 'PAUL', 'Écoute le moteur, fiston. Il tourne rond.')
+    ];
+    if (ch1 === 'A') v.push('Mamie Jo est venue à l’inauguration avec une douzaine d’œufs énormes. Sa ferme est sauvée.');
+    if (ch1 === 'B') v.push('Paul a eu un excellent avocat, mais les fermes ont été vendues. Mamie Jo n’est pas venue.');
+    if (ch2 === 'A') v.push('Une montre en or est accrochée au mur du garage, au-dessus de l’établi.');
+    if (ch2 === 'B') v.push('Marco envoie une lettre de prison : « Merci, champion. »');
+    if (this.drap.kessler) v.push('Grâce au registre de la station fantôme, Kessler est condamné lui aussi.');
+    v.push('Le commissaire Brun a démissionné avant d’être interrogé. Inès a promis de le retrouver.');
+  } else if (this.epilogue === 'prix') {
+    plans = [
+      S('quai', ['joueur', 'delorme'], 'LÉO', 'Mon père sort demain matin. Et je veux le garage.'),
+      S('quai', ['delorme'], 'DELORME', 'Vous l’aurez. Neuf, plus grand. Et cent mille dollars pour oublier cette nuit.'),
+      S('quai', ['ines', 'joueur'], 'INÈS', 'Marchand ? Où est Delorme ?'),
+      S('quai', ['joueur'], 'LÉO', 'Parti.'),
+      S('quai', ['ines'], 'INÈS', '… Je m’étais trompée sur toi. Pas dans le bon sens.'),
+      S('garage', ['paul'], 'PAUL', 'Tu m’as sorti de prison, fiston. Mais toi, qui va te sortir de là ?')
+    ];
+    if (ch1 === 'A') v.push('Mamie Jo envoie un mot : « Tu as sauvé nos terres. Dommage pour le reste, le gamin. »');
+    if (ch1 === 'B') v.push('Toutes les fermes ont été vendues à une autre société.');
+    if (ch2 === 'A') v.push('Léo garde la montre de Marco dans sa poche. Il ne la regarde jamais.');
+    if (ch2 === 'B') v.push('Marco reste en prison. Son témoignage ne sert plus à rien.');
+    v.push('Delorme a quitté le pays. Horizon City ne sera jamais construite. Le garage est neuf, et Paul refuse d’y entrer.');
+  } else {
+    plans = [
+      S('quai', ['joueur', 'delorme'], 'LÉO', 'Toute la ville vous écoute, Delorme. Racontez-leur 1979. Et racontez-leur cette nuit.'),
+      S('quai', ['delorme'], 'DELORME', '… Vous voulez que je parle à ceux qui ne sont pas venus nous chercher ?'),
+      S('quai', ['joueur', 'delorme'], 'LÉO', 'Je veux que vous parliez à ceux que vous alliez noyer. C’est les mêmes gens qu’en 1979.'),
+      S('quai', ['delorme'], 'DELORME', '… Je m’appelle Victor Delorme. J’avais neuf ans, et j’ai attendu trois jours sur un toit.'),
+      S('radio', ['sly'], 'SLY', 'Liberty Lake… je crois qu’on n’a jamais entendu ça.'),
+      S('garage', ['toto', 'joueur'], 'TOTO', 'Frérot, on a sauvé la ville. Je crois que j’ai jamais eu aussi faim de ma vie.')
+    ];
+    if (ch1 === 'A') v.push('Mamie Jo a coupé le ruban de la digue, fusil à l’épaule « au cas où ».');
+    if (ch1 === 'B') v.push('L’argent de la digue a aussi racheté les fermes vendues. Mamie Jo vous a pardonné.');
+    if (ch2 === 'A') v.push('Le nom de Marco Vidal est gravé sur la plaque de la digue, juste en dessous.');
+    if (ch2 === 'B') v.push('Marco obtient une peine réduite. Toto lui propose d’être associé du food-truck.');
+    v.push('Avant son procès, Delorme donne sa fortune pour une vraie digue. Sur la plaque : « Pour ceux de 1979. Et pour ceux d’aujourd’hui. »');
+  }
+  for (const t of v) plans.push(S(this.epilogue === 'aveu' ? 'parc' : 'garage', ['joueur'], null, t));
+  const titres = { justice: 'FIN — JUSTICE', prix: 'FIN — LE PRIX', aveu: 'FIN — AVEU' };
+  G.ext.scene = new Scene(plans, titres[this.epilogue], () => this.ecranFinal());
+};
+Campagne.prototype.ecranFinal = function () {
+  const G = this.G;
+  const titres = { justice: 'FIN — JUSTICE', prix: 'FIN — LE PRIX', aveu: 'FIN — AVEU' };
+  G.ext.flash(titres[this.epilogue] || 'FIN');
+  G.notify('Eaux Troubles terminé : ' + this.faites.filter(n => typeof n === 'number').length +
+    ' / ' + QUETES.length + ' missions principales, ' + this.secs().faites.length + ' / ' +
+    SECONDAIRES.length + ' secondaires');
+  if (this.drap.policeSevere) G.notify('Inès ne vous aidera plus : la police sera plus dure avec vous');
+};
+
+/* --- fin d'acte : une mission secondaire n'en termine aucun --- */
+const _apresQueteET = Campagne.prototype.apresQuete;
+Campagne.prototype.apresQuete = function (d) {
+  if (d.sec) {
+    this.secs().terminer(d.n);
+    this.placerRecruteur();
+    this.G.save();
+    return;
+  }
+  _apresQueteET.call(this, d);
+  this.secs().placer();
+  // « Le dernier quai » est la dernière mission : l'épilogue enchaîne
+  if (d.n === 28) this.finCampagne();
+};
+
+/* ======================================================================
+   9. HUD ET ONGLET DE L'HISTOIRE
+   La fiche d'origine affichait un coût d'entrée et du matériel exigé :
+   ici, rien ne s'achète pour avancer. On montre le donneur, le rappel du
+   journal, la paie et le chrono.
+   ====================================================================== */
+Extensions.prototype.ficheQuete = function (g, G) {
+  const camp = this.camp;
+  if (camp.q) return;
+  const sec = camp.secs().proche(G);
+  const d = camp.def();
+  if (!camp.proche && !sec) return;
+  const def = sec ? camp.secs().mission(camp.secs().def(sec.id)) : d;
+  if (!def) return;
+  /* --- un appel en attente tient sur une ligne : il reste affiché tant
+     qu'on n'a pas décroché, donc il doit être discret. --- */
+  if (camp.tel && !sec) {
+    const w = Math.min(380, G.cw - 40), x = (G.cw - w) / 2, y = G.ch - 232;
+    G.hud.glass(g, x, y, w, 46, 10);
+    g.fillStyle = '#ffd45e'; g.font = '700 12px ' + ART.hud.police;
+    g.fillText('APPEL — ' + nomPerso(def.donneur).toUpperCase(), x + 14, y + 19);
+    g.fillStyle = '#cfdcea'; g.font = '600 11px ' + ART.hud.police;
+    g.fillText('F — répondre  ·  mission ' + def.n + ' : ' + def.titre, x + 14, y + 36);
+    return;
+  }
+  const W = Math.min(440, G.cw - 40), X = (G.cw - W) / 2, H = 124, Y = G.ch - H - 190;
+  G.hud.glass(g, X, Y, W, H, 12);
+  const col = sec ? '#7fd3ff' : '#ffd45e';
+  g.fillStyle = col; g.font = '700 13px ' + ART.hud.police;
+  g.fillText((sec ? 'MISSION SECONDAIRE ' : 'ACTE ' + romain(def.acte) + ' · MISSION ') +
+    def.n + ' — ' + def.titre.toUpperCase(), X + 16, Y + 24);
+  g.fillStyle = '#8fa2b8'; g.font = '600 11px ' + ART.hud.police;
+  g.fillText((camp.tel && !sec ? 'Appel de ' : 'Donné par ') + nomPerso(def.donneur) +
+    (sec ? '' : '  ·  ' + ACTES[def.acte - 1].nom), X + 16, Y + 40);
+  g.fillStyle = '#cfdcea'; g.font = '600 12px ' + ART.hud.police;
+  wrapText(g, def.journal || '', X + 16, Y + 62, W - 32, 15);
+  g.fillStyle = '#7ae582'; g.font = '600 11px ' + ART.hud.police;
+  const paie = Math.round((def.gain || 0) * camp.coefActe());
+  g.fillText(paie > 0 ? 'Paie : ' + paie.toLocaleString('fr-FR') + ' $' : 'Paie : aucune — mais vous avancerez',
+    X + 16, Y + H - 28);
+  if (def.temps) {
+    g.fillStyle = '#7fd3ff'; g.textAlign = 'right';
+    g.fillText('Chrono : ' + def.temps + ' s par objectif', X + W - 16, Y + H - 28);
+    g.textAlign = 'left';
+  }
+  g.fillStyle = col; g.font = '700 11px ' + ART.hud.police;
+  g.fillText(camp.tel && !sec ? 'F — répondre' : 'F — accepter', X + 16, Y + H - 10);
+};
+
+/* --- bandeau de rappel pendant la mission : la ligne de journal --- */
+Extensions.prototype.bandeauHistoire = function (g, G) {
+  const q = this.camp.q;
+  if (!q || !q.d.journal || G.shopOpen) return;
+  const etroit = G.cw < 880;
+  const mw = Math.min(318, G.cw - 36);
+  const my = (etroit ? 96 : G.ch - 140) - 34;
+  G.hud.glass(g, 16, my, mw, 28, 8);
+  g.fillStyle = '#8fa2b8'; g.font = '600 10px ' + ART.hud.police;
+  g.fillText(q.d.sec ? 'SECONDAIRE' : 'JOURNAL', 30, my + 12);
+  g.fillStyle = '#e8eef5'; g.font = '600 11px ' + ART.hud.police;
+  const t = q.d.journal;
+  g.fillText(t.length > 54 ? t.slice(0, 53) + '…' : t, 30, my + 24);
+};
+const _drawHudET = Extensions.prototype.drawHud;
+Extensions.prototype.drawHud = function (g) {
+  _drawHudET.call(this, g);
+  if (!this.camp) return;
+  g.save();
+  g.font = '600 12px ' + ART.hud.police;
+  this.bandeauHistoire(g, this.G);
+  g.restore();
+};
+
+/* --- boîte de choix : une option peut être grisée (fin « Aveu ») --- */
+const _boiteChoixET = Extensions.prototype.boiteChoixMoral;
+Extensions.prototype.boiteChoixMoral = function (g, G) {
+  _boiteChoixET.call(this, g, G);
+  const c = this.camp.choix;
+  if (!c || !c.gris) return;
+  const W = Math.min(520, G.cw - 40), X = (G.cw - W) / 2, Y = G.ch * 0.3;
+  const H = 54 + c.a.length * 30;
+  const yy = Y + 48 + c.a.length * 30;
+  g.fillStyle = 'rgba(92,110,132,.12)'; rr(g, X + 14, yy - 16, W - 28, 26, 7); g.fill();
+  g.fillStyle = '#5c6e84'; g.font = '600 11px ' + ART.hud.police;
+  g.fillText(c.gris[0], X + 24, yy + 1);
+};
+
+/* --- l'onglet CAMPAGNE devient le carnet de l'enquête --- */
+Extensions.prototype.ongletCampagne = function (g, x, y, w, h) {
+  const G = this.G, camp = this.camp, sec = camp.secs();
+  const faitesP = camp.faites.filter(n => typeof n === 'number');
+  this.titre(g, 'EAUX TROUBLES — ' + faitesP.length + ' / ' + QUETES.length + ' MISSIONS', x, y);
+  let yy = y + 26;
+  const d = camp.def();
+  if (d) {
+    this.ligne(g, 'Acte en cours', romain(d.acte) + ' — ' + ACTES[d.acte - 1].nom, x, yy, '#ffd45e'); yy += 20;
+    this.ligne(g, 'Prochaine mission', d.n + '. ' + d.titre, x, yy); yy += 20;
+    this.ligne(g, camp.tel ? 'Appel attendu de' : 'Vous attend', nomPerso(d.donneur) +
+      (camp.tel ? ' (répondez où vous voulez)' : ''), x, yy, '#7fd3ff'); yy += 20;
+    g.fillStyle = '#cfdcea'; g.font = '600 12px ' + ART.hud.police;
+    wrapText(g, d.journal || '', x, yy, w * 0.46, 15); yy += 30;
+  } else {
+    const t = { justice: 'Justice', prix: 'Le Prix', aveu: 'Aveu' };
+    this.ligne(g, 'Campagne', 'terminée', x, yy, '#7ae582'); yy += 20;
+    this.ligne(g, 'Fin obtenue', t[camp.epilogue] || '—', x, yy, '#ffd45e'); yy += 26;
+  }
+  this.titre(g, 'CHOIX MARQUANTS', x, yy); yy += 24;
+  const jalons = [
+    ['rendreArgent', 'L’argent du fourgon rendu aux fermiers'],
+    ['garderArgent', 'L’argent du fourgon gardé pour l’avocat'],
+    ['pardonMarco', 'Marco pardonné'],
+    ['livrerMarco', 'Marco livré à Inès'],
+    ['radio', 'Liberty FM réémet (fin « Aveu » ouverte)'],
+    ['dessin', 'Le dessin d’enfance de Victor retrouvé'],
+    ['kessler', 'Registre signé Kessler en main'],
+    ['veh_la_comete', 'La Comète récupérée']
+  ];
+  g.font = '600 12px ' + ART.hud.police;
+  let aucun = true;
+  for (const j of jalons) {
+    if (!camp.drapeau(j[0])) continue;
+    aucun = false;
+    g.fillStyle = '#cfdcea'; g.fillText('• ' + j[1], x, yy); yy += 17;
+  }
+  if (aucun) { g.fillStyle = '#5c6e84'; g.fillText('Aucun choix marquant pour l’instant.', x, yy); yy += 17; }
+  yy += 14;
+  this.titre(g, 'INDICES RECUEILLIS', x, yy); yy += 22;
+  g.font = '600 11px ' + ART.hud.police;
+  const ind = (camp.indices || []).slice(-7);
+  if (!ind.length) { g.fillStyle = '#5c6e84'; g.fillText('L’enquête n’a encore rien donné.', x, yy); }
+  for (const i of ind) {
+    g.fillStyle = '#9ec5ff';
+    wrapText(g, '› ' + i.t, x, yy, w * 0.46, 14);
+    yy += 14 * Math.ceil(i.t.length / 56) + 4;
+    if (yy > y + h - 20) break;
+  }
+  /* --- colonne de droite : les actes, puis les secondaires --- */
+  const x2 = x + w * 0.52;
+  this.titre(g, 'LES CINQ ACTES', x2, y);
+  let y2 = y + 26;
+  for (const a of ACTES) {
+    const liste = QUETES.filter(q => q.acte === a.n);
+    const n = liste.filter(q => camp.faites.indexOf(q.n) >= 0).length;
+    const fini = n === liste.length;
+    g.fillStyle = fini ? '#7ae582' : n ? '#ffd45e' : '#5c6e84';
+    g.font = '700 12px ' + ART.hud.police;
+    g.fillText(romain(a.n) + '. ' + a.nom, x2, y2);
+    g.font = '600 11px ' + ART.hud.police; g.textAlign = 'right';
+    g.fillText(n + ' / ' + liste.length, x2 + 250, y2);
+    g.textAlign = 'left';
+    G.hud.bar(g, x2, y2 + 5, 250, 5, n / liste.length, fini ? '#7ae582' : '#ffd45e');
+    y2 += 26;
+  }
+  y2 += 12;
+  this.titre(g, 'MISSIONS SECONDAIRES — ' + sec.faites.length + ' / ' + SECONDAIRES.length, x2, y2);
+  y2 += 22;
+  g.font = '600 11px ' + ART.hud.police;
+  for (const s of SECONDAIRES) {
+    const faite = sec.faite(s.id), ouverte = sec.ouverte(s);
+    g.fillStyle = faite ? '#7ae582' : ouverte ? '#7fd3ff' : '#5c6e84';
+    g.fillText((faite ? '✓ ' : ouverte ? '› ' : '· ') + s.id + '. ' + s.titre +
+      (ouverte ? '  —  ' + nomPerso(s.donneur) : ''), x2, y2);
+    y2 += 16;
+    if (y2 > y + h - 16) break;
+  }
+};
+
+/* ======================================================================
+   10. SAUVEGARDE
+   Les secondaires et les indices s'ajoutent à l'enregistrement existant.
+   ====================================================================== */
+const _serialiserET = Campagne.prototype.serialiser;
+Campagne.prototype.serialiser = function () {
+  const o = _serialiserET.call(this);
+  o.sec = this.secs().serialiser();
+  o.indices = this.indices || [];
+  return o;
+};
+/* --- reconnaître une sauvegarde de l'ancienne campagne --- */
+const ANCIENS_DRAPEAUX = ['detruitLabo', 'livreLabo', 'assautVasseur', 'negoVasseur',
+  'executeTraitre', 'epargneTraitre', 'rupture', 'creteOuverte', 'montagne'];
+function ancienneCampagneET(s) {
+  if (!s) return false;
+  if (Array.isArray(s.faites) && s.faites.some(n => typeof n === 'number' && n > QUETES.length)) return true;
+  if ((s.idx | 0) > QUETES.length) return true;
+  if (s.drap) for (const k of ANCIENS_DRAPEAUX) if (s.drap[k]) return true;
+  return false;
+}
+
+const _restaurerET = Campagne.prototype.restaurer;
+Campagne.prototype.restaurer = function (s) {
+  if (ancienneCampagneET(s)) {
+    // on garde la partie, on recommence l'histoire
+    s = Object.assign({}, s, { idx: 0, faites: [], drap: {}, epilogue: null, scenes: {}, sec: null, indices: [] });
+    const G = this.G;
+    setTimeout(() => {
+      if (!G.notify) return;
+      G.notify('Nouvelle histoire : « Eaux Troubles » remplace l’ancienne campagne');
+      G.notify('Votre progression d’enquête repart à zéro — argent et véhicules conservés');
+    }, 400);
+  }
+  _restaurerET.call(this, s);
+  if (!s) return;
+  this.indices = Array.isArray(s.indices) ? s.indices : [];
+  this.secs().restaurer(s.sec);
+  this.appliquerVariantes();
+  this.placerRecruteur();
+};
+
+/* --- première partie : le ton de départ, et aucun verrou d'argent --- */
+const _installET = Extensions.prototype.installerCampagne;
+Extensions.prototype.installerCampagne = function () {
+  _installET.call(this);
+  const G = this.G, camp = this.camp;
+  camp.resoudreLieux();
+  camp.secs().placer();
+  camp.appliquerVariantes();
+  camp.placerRecruteur();
+  if (!G._extSave) {
+    G.player.money = 320;                 // la paie de la semaine, rien de plus
+    this.fin.coffre = 0;
+    G.notify('Garage Marchand & Fils. Votre père vous attend pour la berline de Mme Lopez.');
+    G.ext.flash('ACTE I — LE FEU');
+  }
+};
+
+/* --- la police est plus dure après la fin « Le Prix » --- */
+const _wantedET = Game.prototype.addWanted;
+Game.prototype.addWanted = function (pts, raison) {
+  const camp = this.ext && this.ext.camp;
+  _wantedET.call(this, camp && camp.drap.policeSevere ? pts * 1.5 : pts, raison);
+};
 
 /* =============================== DÉMARRAGE ============================ */
 let G = null;
