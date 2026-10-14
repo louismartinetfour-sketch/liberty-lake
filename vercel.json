@@ -4,7 +4,7 @@
   "buildCommand": "echo \"Rien a construire : le jeu est un fichier HTML statique.\"",
   "installCommand": "echo \"Aucune dependance cote site.\"",
   "outputDirectory": ".",
-  "cleanUrls": true,
+  "cleanUrls": false,
   "trailingSlash": false,
   "rewrites": [
     {
